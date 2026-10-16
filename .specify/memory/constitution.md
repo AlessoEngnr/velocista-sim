@@ -7,7 +7,11 @@
 - El contrato en `contract/` define toda la interfaz externa del sistema y prevalece sobre el
   código, la documentación y cualquier otra fuente.
 - El único transporte permitido es WebSocket; todos los mensajes son JSON.
-- Toda magnitud física en los mensajes MUST expresarse en unidades SI (m, s, rad, m/s, rad/s, …).
+- Toda magnitud física en los mensajes MUST expresarse en unidades SI (m, s, rad, m/s, rad/s, …),
+  salvo las excepciones definidas explícitamente como tales en el contrato, con su unidad y rango
+  (en v1: tiempo en ms, lecturas de sensores en cuentas ADC crudas, `line_position` en milésimas
+  de sensor y PWM de motores en −255…255). Una unidad no SI que no figure como excepción en el
+  contrato está prohibida.
 - Ningún mensaje, campo o comando puede añadirse, modificarse o eliminarse en el código sin antes
   actualizar el contrato (texto y JSON Schema) en un commit previo o en el mismo cambio.
 
@@ -125,4 +129,4 @@ en la práctica.
   (`contract/contrato-v1.1-velocista-sim.pdf`). El principio VII exige un JSON Schema por cada
   tipo de mensaje en `contract/`; deben extraerse del contrato antes de implementar mensajes.
 
-**Version**: 1.0.0 | **Ratified**: 2026-10-16 | **Last Amended**: 2026-10-16
+**Version**: 1.1.0 | **Ratified**: 2026-10-16 | **Last Amended**: 2026-10-16
