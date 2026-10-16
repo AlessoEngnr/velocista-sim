@@ -49,10 +49,10 @@ los descubre solo, así que agregar un ejemplo agrega un test.
 
 **Purpose**: dependencias, configuración de pytest, CI y estructura de carpetas.
 
-- [ ] T001 Mover `jsonschema` de dependencia de desarrollo a dependencia de ejecución con `uv remove --dev jsonschema` y `uv add jsonschema` (research R1); verificar que `pyproject.toml` lo lista en `[project].dependencies`, que `uv.lock` se actualiza y que `pytest` sigue en el grupo `dev`
-- [ ] T002 Agregar a `pyproject.toml` la sección `[tool.pytest.ini_options]` con `testpaths = ["tests"]` y `addopts = "-ra"` (research R11)
-- [ ] T003 [P] Crear `.github/workflows/tests.yml`: nombre `tests`, disparado en `push` y `pull_request`, job en `ubuntu-latest` con los pasos `actions/checkout@v5`, `astral-sh/setup-uv@v6` (con `enable-cache: true`), `uv sync --locked` y `uv run pytest` (research R10)
-- [ ] T004 [P] Crear la estructura de carpetas vacía con `.gitkeep` donde haga falta: `contract/schemas/messages/`, `contract/schemas/commands/`, `contract/examples/valid/`, `contract/examples/invalid/`, `src/velocista_sim/contract/`, `tests/contract/`, `tests/unit/`
+- [X] T001 Mover `jsonschema` de dependencia de desarrollo a dependencia de ejecución con `uv remove --dev jsonschema` y `uv add jsonschema` (research R1); verificar que `pyproject.toml` lo lista en `[project].dependencies`, que `uv.lock` se actualiza y que `pytest` sigue en el grupo `dev`
+- [X] T002 Agregar a `pyproject.toml` la sección `[tool.pytest.ini_options]` con `testpaths = ["tests"]` y `addopts = "-ra"` (research R11)
+- [X] T003 [P] Crear `.github/workflows/tests.yml`: nombre `tests`, disparado en `push` y `pull_request`, job en `ubuntu-latest` con los pasos `actions/checkout@v5`, `astral-sh/setup-uv@v6` (con `enable-cache: true`), `uv sync --locked` y `uv run pytest` (research R10)
+- [X] T004 [P] Crear la estructura de carpetas vacía con `.gitkeep` donde haga falta: `contract/schemas/messages/`, `contract/schemas/commands/`, `contract/examples/valid/`, `contract/examples/invalid/`, `src/velocista_sim/contract/`, `tests/contract/`, `tests/unit/`
 
 ---
 
