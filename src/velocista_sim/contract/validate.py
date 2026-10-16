@@ -12,6 +12,7 @@ from typing import Any
 
 from jsonschema import Draft202012Validator, ValidationError
 
+from .context_rules import context_violations
 from .result import ValidationResult, Violation, sorted_violations
 from .schemas import SchemaStore, load_schemas
 
@@ -76,7 +77,7 @@ def validate_track(track: Any) -> ValidationResult:
 
 def _context_violations(message: dict, hello: dict) -> list[Violation]:
     """Capa 2: reglas que dependen del `hello` de la sesión."""
-    return []
+    return context_violations(message, hello)
 
 
 def _track_violations(track: dict) -> list[Violation]:
