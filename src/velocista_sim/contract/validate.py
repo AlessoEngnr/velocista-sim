@@ -15,6 +15,7 @@ from jsonschema import Draft202012Validator, ValidationError
 from .context_rules import context_violations
 from .result import ValidationResult, Violation, sorted_violations
 from .schemas import SchemaStore, load_schemas
+from .track_rules import track_violations
 
 
 def validate_message(message: Any, hello: dict | None = None) -> ValidationResult:
@@ -43,7 +44,10 @@ def validate_message(message: Any, hello: dict | None = None) -> ValidationResul
 
 
 def validate_command(command: Any) -> ValidationResult:
-    """Valida un comando cliente→servidor; elige el schema por `cmd`."""
+    """Valida un comando cliente→servidor; elige el schema por `cmd`.
+
+    Para `load_track` aplica también la semántica de pista, con los paths bajo `/track`.
+    """
     if not isinstance(command, dict):
         return _not_an_object()
     name = _schema_name("commands", command.get("cmd"))
@@ -52,7 +56,12 @@ def validate_command(command: Any) -> ValidationResult:
             "unknown_cmd", "/cmd", f"comando desconocido o ausente: {_show(command.get('cmd'))}"
         )
         return ValidationResult((violation,), False)
-    return ValidationResult(sorted_violations(_schema_violations(name, command)), False)
+    violations = _schema_violations(name, command)
+    if not violations and command["cmd"] == "load_track":
+        violations = [
+            Violation(v.rule, "/track" + v.path, v.message) for v in _track_violations(command["track"])
+        ]
+    return ValidationResult(sorted_violations(violations), False)
 
 
 def validate_profile(profile: Any) -> ValidationResult:
@@ -60,6 +69,15 @@ def validate_profile(profile: Any) -> ValidationResult:
     if not isinstance(profile, dict):
         return _not_an_object()
     return ValidationResult(sorted_violations(_schema_violations("robot-profile", profile)), False)
+
+
+def effective_profile(profile: dict) -> dict[str, object]:
+    """Valor efectivo de cada parámetro del perfil: `measured` si no es `null`; si no, `default`."""
+    return {
+        name: param["default"] if param.get("measured") is None else param["measured"]
+        for name, param in profile.items()
+        if isinstance(param, dict) and "default" in param
+    }
 
 
 def validate_track(track: Any) -> ValidationResult:
@@ -82,7 +100,7 @@ def _context_violations(message: dict, hello: dict) -> list[Violation]:
 
 def _track_violations(track: dict) -> list[Violation]:
     """Capa 3: semántica de la pista."""
-    return []
+    return track_violations(track)
 
 
 # --- Capa 1: JSON Schema ------------------------------------------------------------------

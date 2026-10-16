@@ -337,13 +337,147 @@ Ciclo del optimizador: `set_config` → `start` → (telemetría, eventos) → `
 leer `summary` → siguiente `set_config`. Como `summary.config` tiene la misma forma que
 `set_config`, se puede reenviar tal cual (agregándole `"cmd": "set_config"`).
 
+### Comandos solo-sim
+
+Existen solo en el simulador. El robot real responde a todos con `error` `sim_only` y nada cambia
+(FR-030). En el simulador, si hay una corrida activa responden `error` `run_active`: se deben
+enviar con la corrida detenida (FR-032).
+
+| `cmd` | Campos | Efecto | Schema |
+|---|---|---|---|
+| `reset` | — | Vuelve el robot a la línea de salida | [`reset`](./schemas/commands/reset.schema.json) |
+| `load` | `robot_id` (string) | Cambia el perfil de robot. El servidor reenvía `hello` y luego `config`; desde ahí todo se interpreta con el nuevo `hello`. Es el **único** comando que cambia datos de `hello` (FR-013). `robot_id` inexistente → `error` `unknown_robot` | [`load`](./schemas/commands/load.schema.json) |
+| `set_profile` | `measured` (objeto: parámetro → valor o `null`) | Fija (valor) o borra (`null`) valores medidos de parámetros físicos y de calibración. Responde `config` | [`set_profile`](./schemas/commands/set_profile.schema.json) |
+| `load_track` | `track` (pista [track v1](#pista-track-v1)) | Carga la pista en el mundo. Responde `config` con el `track_id` de la pista. Pista inválida → `error` `invalid_track` | [`load_track`](./schemas/commands/load_track.schema.json) |
+
+Reglas de `set_profile` (FR-037):
+
+- Solo acepta los 12 parámetros físicos y de calibración (ver [Perfil del robot](#perfil-del-robot)):
+  `sensor_pitch_m`, `sensor_offset_m`, `adc_white`, `adc_black`, `adc_noise`, `max_speed_mps`,
+  `motor_tau_ms`, `wheelbase_m`, `max_lateral_accel_mps2`, `turbine_suction_n`,
+  `encoder_ticks_per_rev` y `control_period_ms`.
+- Un parámetro de `hello` o un parámetro inexistente → `error` `invalid_params`. Para cambiar un
+  parámetro de `hello` hay que cargar otro perfil con `load`.
+- Un valor con tipo incorrecto → `invalid_params`; con tipo correcto pero fuera de rango →
+  `out_of_range`. Cada valor tiene el rango de su parámetro.
+- Se aplica **todo o nada**: si un parámetro se rechaza, no cambia ninguno.
+
+Ejemplos:
+
+```json
+{"cmd": "reset"}
+{"cmd": "load", "robot_id": "velocista-01"}
+{"cmd": "set_profile", "measured": {"wheelbase_m": 0.128}}
+{"cmd": "set_profile", "measured": {"wheelbase_m": null}}
+{"cmd": "load_track", "track": {"id": "oval-small", "v": 1, "...": "..."}}
+```
+
 ## Perfil del robot
 
-<!-- Se completa con la historia de usuario 3. -->
+Parámetros con que el simulador modela el robot. Schema:
+[`robot-profile.schema.json`](./schemas/robot-profile.schema.json) · Ejemplos:
+[`valid/robot-profile/`](./examples/valid/robot-profile/),
+[`invalid/robot-profile/`](./examples/invalid/robot-profile/).
+
+Cada parámetro tiene la forma (FR-035):
+
+```json
+"wheelbase_m": {"default": 0.130, "measured": null, "source": "estimated"}
+```
+
+| Campo | Significado |
+|---|---|
+| `default` | Valor por defecto |
+| `measured` | Valor medido en el robot real, del mismo tipo y rango que `default`, o `null` si no se midió |
+| `source` | Origen del valor por defecto: `defined` (definido por el equipo), `datasheet`, `estimated` o `current_robot` (tomado del robot actual) |
+
+El **valor efectivo** de cada parámetro es `measured` si no es `null`; si no, `default`. El
+simulador usa siempre el valor efectivo. En Python: `velocista_sim.contract.effective_profile`.
+
+Parámetros del perfil v1 (FR-036). Los que tienen campo en `hello` son **parámetros de `hello`**
+(solo cambian con `load`); el resto son **parámetros físicos y de calibración** (los que acepta
+`set_profile`).
+
+| Parámetro | Tipo / rango | Unidad | Defecto v1 | `source` | Campo en `hello` |
+|---|---|---|---|---|---|
+| `id` | string no vacío (sin `measured`: siempre `null`) | — | `velocista-01` | defined | `robot.id` |
+| `firmware` | string no vacío | — | `sim-0.1` | defined | `robot.firmware` |
+| `hw_rev` | string no vacío | — | `A` | defined | `robot.hw_rev` |
+| `line_sensors` | entero ≥ 1 | — | 16 | current_robot | `capabilities.line_sensors` |
+| `adc_bits` | entero 8–16 | — | 12 | current_robot | `capabilities.adc_bits` |
+| `sensor_pitch_m` | número > 0 | m | 0.009525 | datasheet | — |
+| `sensor_offset_m` | número > 0 (regleta delante del eje) | m | 0.085 | estimated | — |
+| `adc_white` | entero 0–65535 | ADC | 200 | estimated | — |
+| `adc_black` | entero 0–65535 | ADC | 3900 | estimated | — |
+| `adc_noise` | entero ≥ 0 | ADC (±) | 60 | estimated | — |
+| `motors` | `2` (fijo en v1) | — | 2 | current_robot | `capabilities.motors` |
+| `max_speed_mps` | número > 0 (a PWM 255) | m/s | 2.8 | estimated | — |
+| `motor_tau_ms` | número > 0 | ms | 45 | estimated | — |
+| `wheelbase_m` | número > 0 | m | 0.130 | estimated | — |
+| `max_lateral_accel_mps2` | número > 0 | m/s² | 9.0 | estimated | — |
+| `turbine` | booleano | — | `false` | current_robot | `capabilities.turbine` |
+| `turbine_suction_n` | número ≥ 0 o `null` (sin turbina) | N | `null` | current_robot | — |
+| `encoders` | booleano | — | `false` | current_robot | `capabilities.encoders` |
+| `encoder_ticks_per_rev` | entero ≥ 1 o `null` (sin encoders) | ticks | `null` | current_robot | — |
+| `imu` | booleano | — | `false` | current_robot | `capabilities.imu` |
+| `battery_cells` | entero ≥ 1 | — | 2 | estimated | `capabilities.battery.cells` |
+| `battery_nominal_v` | número > 0 | V | 7.4 | estimated | `capabilities.battery.nominal_v` |
+| `battery_voltage_sense` | booleano | — | `true` | estimated | `capabilities.battery.voltage_sense` |
+| `lap_timing` | booleano | — | `true` | defined | `capabilities.lap_timing` |
+| `control_period_ms` | número > 0 | ms | 2 | estimated | — |
+
+El perfil puede tener parámetros adicionales; los receptores los ignoran (FR-005).
 
 ## Pista track v1
 
-<!-- Se completa con la historia de usuario 3. -->
+Formato con que el trazador exporta una pista y `load_track` la envía al simulador. Solo la
+recibe el **mundo** simulado: ningún mensaje servidor→cliente contiene su geometría, solo su
+`track_id` (FR-021). Schema: [`track.schema.json`](./schemas/track.schema.json) · Ejemplos:
+[`valid/track/`](./examples/valid/track/), [`invalid/track/`](./examples/invalid/track/).
+
+| Campo | Tipo / rango | Significado |
+|---|---|---|
+| `id` | string no vacío | ID de la pista; es el `track_id` de `config` |
+| `v` | `1` | Versión del formato de pista |
+| `name` | string | Nombre legible |
+| `units` | `"m"` | Unidades de todas las longitudes |
+| `board.width`, `board.height` | número > 0, m | Tablero: ocupa `[0, width] × [0, height]` |
+| `line_width` | número > 0, m | Ancho de la línea |
+| `closed` | booleano | `true` si el último punto se une con el primero |
+| `centerline` | array de ≥ 2 puntos `[x, y]`, m | Línea central muestreada cada 0,005 m |
+| `gaps` | array (posiblemente vacío) de `{at, length}`: `at` ≥ 0, `length` > 0, m | Cortes de la línea |
+| `start.at` | número ≥ 0, m | Línea de salida |
+| `rules_profile` | string no vacío | Perfil de **reglamento** del trazador (no es el perfil del robot) |
+| `marks` | cualquiera | Reservado para marcas laterales en una versión posterior; en v1 su presencia no invalida la pista pero no tiene efecto (FR-040) |
+
+Geometría (FR-038, FR-039):
+
+- **Coordenadas**: metros, con origen en la esquina inferior izquierda del tablero, x hacia la
+  derecha e y hacia arriba (el mismo sistema que el trazador).
+- **Posiciones a lo largo de la línea** (`gaps[].at`, `start.at`): distancia en metros recorrida
+  sobre `centerline` desde el primer punto.
+- **Longitud** de `centerline`: suma de las distancias entre puntos consecutivos, más el tramo
+  último → primero si `closed = true`.
+- Reglas que la pista MUST cumplir, con el identificador que usa el validador:
+
+  | Regla | Condición |
+  |---|---|
+  | `track_at_range` | Todo `at` está entre 0 y la longitud de `centerline` |
+  | `track_point_outside_board` | Todo punto de `centerline` está dentro del tablero |
+  | `track_gaps_overlap` | Los intervalos `[at, at + length)` de los `gaps` no se superponen |
+  | `track_sampling` | La distancia entre puntos consecutivos es 0,005 m ± 10 % (4,5–5,5 mm), sin contar el tramo de cierre |
+
+Ejemplo abreviado (PDF v1.1, §7):
+
+```json
+{"id": "junior-02", "v": 1, "name": "Técnica 3 × 2,5", "units": "m",
+ "board": {"width": 3.00, "height": 2.50},
+ "line_width": 0.019, "closed": true,
+ "centerline": [[0.500, 0.450], [0.505, 0.450], "…"],
+ "gaps": [{"at": 4.82, "length": 0.02}],
+ "start": {"at": 0.70},
+ "rules_profile": "lgr2026"}
+```
 
 ## Cambios respecto del PDF v1.1
 
