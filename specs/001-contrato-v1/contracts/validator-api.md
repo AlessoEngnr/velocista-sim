@@ -26,7 +26,7 @@ class ValidationResult:
 
 | Firma | Qué hace |
 |---|---|
-| `validate_message(message: dict, hello: dict \| None = None) -> ValidationResult` | Mensaje servidor→cliente. Elige el schema por `type`; con `hello`, aplica además la capa contextual. Si `message` es un `hello`, se usa a sí mismo como contexto. |
+| `validate_message(message: dict, hello: dict \| None = None) -> ValidationResult` | Mensaje servidor→cliente. Elige el schema por `type`; con `hello`, aplica además la capa contextual. Si `message` es un `hello`, se usa a sí mismo como contexto. Quien llama MUST pasar el **último** `hello` de la sesión: tras un `load` llega uno nuevo (FR-013). |
 | `validate_command(command: dict) -> ValidationResult` | Comando cliente→servidor. Elige el schema por `cmd`; para `load_track` aplica también la semántica de pista. |
 | `validate_track(track: dict) -> ValidationResult` | Pista track v1: schema + semántica de pista. |
 | `validate_profile(profile: dict) -> ValidationResult` | Perfil del robot. |

@@ -47,7 +47,7 @@ servidor sin ralentizarlos.
 - Los campos desconocidos se aceptan (FR-005, R4).
 
 **Scale/Scope**: 6 mensajes, 4 subtipos de evento, 9 comandos, perfil y pista. Unos 18 schemas y
-del orden de 80 ejemplos. 3 capas de reglas, con unas 17 reglas no expresables en schema.
+del orden de 80 ejemplos. 3 capas de reglas, con 23 reglas no expresables en schema (19 contextuales y 4 de pista).
 
 ## Constitution Check
 
@@ -56,7 +56,7 @@ del orden de 80 ejemplos. 3 capas de reglas, con unas 17 reglas no expresables e
 | Principio / regla | Evaluación | Estado |
 |---|---|---|
 | I. El contrato es la fuente de verdad | El contrato queda en `contract/` como texto y JSON Schema. Los cambios respecto del PDF se documentan en `contract-v1.md` (R9). Solo hay WebSocket y JSON. Las unidades no SI son las excepciones definidas en el contrato, como permite la constitución v1.1.0. | ✅ |
-| II. Paridad sim–robot | Los elementos solo-sim están marcados en el texto. El validador rechaza `sim_truth` cuando `source = "robot"`, y cada campo opcional emitido sin su capacidad declarada (`odometry`, `battery_v`, `lap`). | ✅ |
+| II. Paridad sim–robot | Los elementos solo-sim están marcados en el texto. El validador rechaza `sim_truth` cuando `source = "robot"` y cada campo condicionado emitido sin su capacidad declarada (`odometry`, `battery_v`, `lap`), y exige esos campos cuando la capacidad sí está declarada (reglas `*_missing`). Los datos de `hello` solo cambian con `load`, que reenvía `hello`. | ✅ |
 | III. El robot no conoce la pista | No aplica: no hay código del mundo ni del controlador. FR-021 (sin geometría en los mensajes salientes) queda en el texto del contrato; la verificación en el servidor corresponde a su spec. | ✅ N/A |
 | IV. Control a bordo | Ningún comando del schema permite control por ciclo (FR-029). | ✅ |
 | V. Perfil con defecto y medido | `robot-profile.schema.json` exige `{default, measured, source}` por parámetro. `effective_profile` calcula el valor efectivo. | ✅ |
@@ -88,6 +88,7 @@ specs/001-contrato-v1/
 │   ├── validator-api.md     # interfaz pública de velocista_sim.contract
 │   └── example-format.md    # formato y reglas de contract/examples/
 ├── checklists/requirements.md
+├── review.md                # revisión del contrato por front, backend y firmware (SC-004, SC-006)
 └── tasks.md                 # fase 2 (/speckit-tasks), aún no creado
 ```
 

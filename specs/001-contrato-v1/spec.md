@@ -21,6 +21,14 @@ ambiguo o se contradice, esta especificación fija una decisión y la registra e
 - Q: ¿Desconexión y keepalive? → A: Se pierden la sesión y la corrida (el robot real se detiene); el keepalive es el ping/pong de WebSocket. (FR-007, FR-007a)
 - Q: ¿`seq` se reinicia por sesión o por corrida? → A: Por sesión; empieza en 0 y nunca se reinicia. (FR-018)
 
+### Session 2026-10-16 (resolución del análisis)
+
+- ¿Pueden cambiar los datos de `hello` a mitad de sesión? → Solo con `load`, tras el cual el servidor reenvía `hello` y luego `config`; `set_profile` rechaza los parámetros de `hello` con `invalid_params`; se valida siempre con el último `hello`. (FR-013, FR-029, FR-037)
+- ¿Una capacidad declarada obliga a enviar su campo? → Sí: `odometry` (con sus campos según `encoders`/`imu`), `battery_v`, `sim_truth` y `lap` (con corrida activa) MUST estar en cada `telemetry` cuando su condición se cumple. (FR-018 a FR-020, FR-024)
+- ¿Cuántos motores admite v1? → Exactamente 2 (`left`, `right`). (FR-013, FR-018)
+- ¿Origen de coordenadas de la pista? → Esquina inferior izquierda del tablero, x a la derecha, y hacia arriba, en metros. (FR-038)
+- Valores de `source` del perfil en inglés: `defined`, `datasheet`, `estimated`, `current_robot`. (FR-035)
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Desarrollar un cliente contra el contrato sin el simulador (Priority: P1)
@@ -57,9 +65,11 @@ comandos y recibiendo las mismas respuestas tanto si habla con el simulador como
 **Why this priority**: es el ciclo de trabajo del optimizador (`set_config` → corre → lee
 `run_finished`) y del front; depende de que los mensajes de la historia 1 estén definidos.
 
-**Independent Test**: con un servidor de prueba que cumpla el contrato, enviar la secuencia
-`set_config` → `start` → `stop` y verificar que llegan, en orden, `config`, `event run_started`,
-telemetría con `running=true` y el mismo `run_id`, y `event run_finished` con su resumen.
+**Independent Test**: validar los ejemplos válidos e inválidos de los comandos `start`, `stop`,
+`set_config`, `set_rate` y `list`, y los mensajes de la secuencia `set_config` → `start` → `stop`
+(`config`, `event run_started`, telemetría con `running=true` y el mismo `run_id`,
+`event run_finished` con su resumen), cada uno por separado. El comportamiento del servidor ante
+esa secuencia y el orden de los mensajes se verifican en la spec del servidor.
 
 **Acceptance Scenarios**:
 
@@ -82,9 +92,9 @@ vez más. Al robot real esos comandos le devuelven error.
 **Why this priority**: permite usar pistas reales y converger hacia el robot físico, pero el
 simulador ya funciona con un perfil y una pista de ejemplo.
 
-**Independent Test**: validar ejemplos válidos e inválidos de pista track v1 y de los comandos
-solo-sim; con un servidor de prueba con `source="robot"`, verificar que cada comando solo-sim
-devuelve `error`.
+**Independent Test**: validar ejemplos válidos e inválidos de pista track v1, del perfil del robot
+y de los comandos solo-sim, y del `error` con `code="sim_only"` que los rechaza en el robot real.
+Que el servidor responda efectivamente esos errores se verifica en la spec del servidor.
 
 **Acceptance Scenarios**:
 
@@ -92,6 +102,8 @@ devuelve `error`.
 2. **Given** una pista con `centerline` de menos de 2 puntos, **When** se valida, **Then** se rechaza.
 3. **Given** un perfil con `wheelbase_m` por defecto 0,130, **When** se envía `set_profile` con `measured.wheelbase_m = 0.128`, **Then** el perfil efectivo usa 0,128 y registra que el valor proviene de una medición.
 4. **Given** una conexión con `source="robot"`, **When** se envía `reset`, `load`, `set_profile` o `load_track`, **Then** se recibe `error` y nada cambia.
+5. **Given** el simulador, **When** se envía `set_profile` con `measured.line_sensors = 8`, **Then** se recibe `error` con `code="invalid_params"` porque `line_sensors` aparece en `hello` y solo `load` puede cambiarlo.
+6. **Given** el simulador, **When** se envía `load` con otro `robot_id` existente, **Then** llegan un `hello` nuevo y luego un `config`, y la telemetría siguiente se interpreta con ese `hello`.
 
 ---
 
@@ -115,6 +127,7 @@ traen `battery_v` sin declarar medición de voltaje.
 3. **Given** un `hello` con `encoders=true`, **When** un `telemetry` incluye `odometry.distance_m` y `odometry.speed_mps`, **Then** es válido.
 4. **Given** el robot real, **When** recibe `list`, **Then** responde `catalog` con `robots` igual a su propio ID y `tracks` vacío.
 5. **Given** un `hello` con `lap_timing=false`, **When** un `telemetry` incluye el bloque `lap` o llega un `event lap`, **Then** se rechaza; un `run_finished` con `laps=null` es válido.
+6. **Given** un `hello` con `encoders=true`, **When** un `telemetry` no incluye `odometry`, **Then** se rechaza: una capacidad declarada obliga a enviar su campo.
 
 ---
 
@@ -122,13 +135,13 @@ traen `battery_v` sin declarar medición de voltaje.
 
 - **Mensaje no JSON o sin `cmd`**: el servidor responde `error` y mantiene la conexión abierta.
 - **Comando desconocido** (`cmd` no listado): `error`; la sesión sigue igual.
-- **`start` con una corrida activa**: `error`; la corrida en curso continúa sin cambios.
-- **`stop` sin corrida activa**: `error`; no se emite `run_finished`.
-- **Comandos solo-sim (`reset`, `load`, `set_profile`, `load_track`) durante una corrida**: `error`; se deben enviar con la corrida detenida.
+- **`start` con una corrida activa** y **`stop` sin corrida activa**: ver FR-031.
+- **Comandos solo-sim durante una corrida**: ver FR-032.
 - **`set_config` durante una corrida**: aplica al instante, la corrida queda marcada con `config_changed=true` y el optimizador la descarta (ver FR-034).
 - **Robot sin detección de vueltas**: no llegan `event lap` ni el bloque `lap` de la telemetría; los clientes funcionan igual (ver FR-024).
 - **Parámetros de conexión desconocidos** (`robot` o `track` que no existen): el simulador envía `hello` y `config` con los valores por defecto y a continuación un `error` que identifica el ID desconocido.
-- **`set_profile` con un parámetro inexistente o fuera de rango**: `error`; el perfil no cambia (todo o nada).
+- **`set_profile` con un parámetro inexistente, fuera de rango o que aparece en `hello`**: `error` `invalid_params` u `out_of_range`; el perfil no cambia (todo o nada, FR-037).
+- **`load` aceptado**: el servidor reenvía `hello` y luego `config`; desde ese momento los mensajes se interpretan con el nuevo `hello` (FR-013).
 - **Pérdida de `seq`**: un salto en `seq` indica mensajes perdidos; el cliente no debe asumir reenvío.
 - **Desconexión durante una corrida**: la sesión y la corrida se pierden; no se emite `run_finished` porque no hay a quién enviarlo. El robot real se detiene por seguridad (ver FR-007).
 - **Telemetría sin corrida**: se sigue enviando a la frecuencia configurada con `running=false` y sin `run_id`.
@@ -159,15 +172,15 @@ traen `battery_v` sin declarar medición de voltaje.
 - **FR-011**: Todo comando cliente→servidor MUST incluir `cmd` (string). `v` es opcional; si se envía y no es `1`, el servidor MUST responder `error`. Los comandos no llevan `t_ms`.
 - **FR-012**: Toda magnitud física MUST expresarse en unidades SI, salvo las excepciones definidas por el contrato: tiempo en ms, lecturas de sensores en cuentas ADC crudas, `line_position` en milésimas de sensor y PWM en −255…255.
 
-#### `hello` — una vez, al conectarse
+#### `hello` — al conectarse y tras cada `load` aceptado
 
-- **FR-013**: `hello` MUST incluir `session_id` (string), `source` (`"sim"` o `"robot"`), `robot` (`id`, `firmware`, `hw_rev`: strings) y `capabilities` con:
+- **FR-013**: El servidor MUST enviar `hello` al abrirse la sesión y de nuevo tras cada `load` aceptado (seguido en ambos casos de un `config`, FR-008, FR-016). Es el único momento en que pueden cambiar los datos de `hello`; todo mensaje posterior MUST interpretarse y validarse con el **último** `hello` recibido. `hello` MUST incluir `session_id` (string), `source` (`"sim"` o `"robot"`), `robot` (`id`, `firmware`, `hw_rev`: strings) y `capabilities` con:
 
   | Campo | Tipo | Rango / valores | Defecto v1 |
   |---|---|---|---|
   | `line_sensors` | entero | ≥ 1 | 16 |
   | `adc_bits` | entero | 8–16 | 12 |
-  | `motors` | entero | ≥ 1 | 2 |
+  | `motors` | entero | `2` (fijo en v1) | 2 |
   | `turbine` | booleano | | `false` |
   | `encoders` | booleano | | `false` |
   | `imu` | booleano | | `false` |
@@ -191,28 +204,31 @@ traen `battery_v` sin declarar medición de voltaje.
   | Campo | Tipo | Unidad / rango | Notas |
   |---|---|---|---|
   | `seq` | entero ≥ 0 | | Por sesión: empieza en 0 con el primer `telemetry` de la sesión, aumenta de a 1 y nunca se reinicia (tampoco al iniciar corridas); un salto indica pérdida |
-  | `run_id` | string | | Presente solo si `running=true` |
+  | `run_id` | string | | Presente si y solo si `running=true` |
   | `running` | booleano | | |
   | `sensors` | array de enteros | 0 … 2^`adc_bits` − 1 | Longitud = `capabilities.line_sensors` |
   | `line_position` | entero | 0 … (`line_sensors` − 1) × 1000 | Centro = (`line_sensors` − 1) × 500 (7500 con 16) |
   | `line_lost` | booleano | | |
   | `error` | entero | | `line_position` − centro |
   | `control` | objeto | | Para `pid`: `p`, `i`, `d`, `out` (números) |
-  | `motors` | objeto | `left`, `right`: entero −255…255 | Uno por motor declarado; PWM aplicado en ese instante |
-  | `lap` | objeto | `n` entero ≥ 0, `current_ms` entero ≥ 0 | Solo con corrida activa y `lap_timing = true` |
-  | `battery_v` | número | V, > 0 | Solo si `battery.voltage_sense = true` |
-  | `odometry` | objeto | ver FR-019 | Solo si `encoders` o `imu` |
-  | `sim_truth` | objeto | ver FR-020 | Solo si `source = "sim"` |
+  | `motors` | objeto | `left`, `right`: entero −255…255 | Los dos obligatorios (v1: `capabilities.motors = 2`); PWM aplicado en ese instante |
+  | `lap` | objeto | `n` entero ≥ 0, `current_ms` entero ≥ 0 | Presente si y solo si hay corrida activa y `lap_timing = true` |
+  | `battery_v` | número | V, > 0 | Presente si y solo si `battery.voltage_sense = true` |
+  | `odometry` | objeto | ver FR-019 | Presente si y solo si `encoders` o `imu` |
+  | `sim_truth` | objeto | ver FR-020 | Presente si y solo si `source = "sim"` |
 
-- **FR-019**: `odometry` MUST incluir `distance_m` (m) y `speed_mps` (m/s) solo si `encoders = true`, y `heading_rad` (rad) solo si `imu = true`. Si ni encoders ni IMU están declarados, `odometry` MUST estar ausente.
-- **FR-020**: `sim_truth` MUST incluir `x`, `y` (m), `theta` (rad), `speed_mps` (m/s) y `distance_m` (m). MUST estar ausente si `source = "robot"`. Ningún comportamiento que deba funcionar con el robot real puede depender de él.
+  "Presente si y solo si" significa: con la condición cumplida el campo MUST estar en **cada**
+  `telemetry`; sin ella MUST estar ausente.
+
+- **FR-019**: Con `encoders = true`, `odometry` MUST incluir `distance_m` (m) y `speed_mps` (m/s); con `encoders = false`, MUST NOT incluirlos. Con `imu = true`, `odometry` MUST incluir `heading_rad` (rad); con `imu = false`, MUST NOT incluirlo. Si ni encoders ni IMU están declarados, `odometry` MUST estar ausente.
+- **FR-020**: `sim_truth` MUST incluir `x`, `y` (m), `theta` (rad), `speed_mps` (m/s) y `distance_m` (m). MUST estar presente en cada `telemetry` si `source = "sim"` y ausente si `source = "robot"`. Ningún comportamiento que deba funcionar con el robot real puede depender de él.
 - **FR-021**: Los mensajes servidor→cliente MUST NOT contener la geometría de la pista; solo su `track_id`.
 
 #### `event` — al instante
 
 - **FR-022**: `event` MUST incluir `event` (uno de `run_started`, `lap`, `off_track`, `run_finished`) y `run_id`, además del envoltorio común.
-- **FR-023**: `run_started` MUST emitirse al iniciar una corrida. `lap` MUST incluir `lap` (entero ≥ 1, número de vuelta completada) y `lap_ms` (entero > 0). `off_track` MUST incluir `reason` (en v1: `"line_lost"`). `run_finished` MUST incluir `summary` con `laps` (entero ≥ 0), `best_lap_ms` y `avg_lap_ms` (entero > 0, o `null` si no hubo vueltas medidas), `off_tracks` (entero ≥ 0), `track_id` (string o `null`), `config` (`controller`, `params`, `base_speed`, con la misma forma que en `config`: la configuración con la que **empezó** la corrida) y `config_changed` (booleano: `true` si se aceptó algún `set_config` durante la corrida).
-- **FR-024**: `run_started` y `run_finished` MUST emitirse siempre, también con el robot real: `run_started` al aceptar `start` y `run_finished` al terminar la corrida. `lap` es opcional: solo se emite si `capabilities.lap_timing = true`, y el robot real v1 declara `false`. El mecanismo de detección de vueltas en el robot real (marcas laterales o cronómetro de meta) queda para una spec futura. Con `lap_timing = false`, el bloque `lap` de `telemetry` MUST estar ausente y `summary.laps`, `best_lap_ms` y `avg_lap_ms` MUST ser `null`.
+- **FR-023**: `run_started` MUST emitirse al iniciar una corrida. `lap` MUST incluir `lap` (entero ≥ 1, número de vuelta completada) y `lap_ms` (entero > 0). `off_track` MUST incluir `reason` (en v1: `"line_lost"`). `run_finished` MUST incluir `summary` con `laps` (entero ≥ 0, o `null` si `lap_timing = false`), `best_lap_ms` y `avg_lap_ms` (entero > 0 si `laps ≥ 1`; `null` si `laps` es `0` o `null`), `off_tracks` (entero ≥ 0), `track_id` (string o `null`), `config` (`controller`, `params`, `base_speed`, con la misma forma que en `config`: la configuración con la que **empezó** la corrida) y `config_changed` (booleano: `true` si se aceptó algún `set_config` durante la corrida).
+- **FR-024**: `run_started` y `run_finished` MUST emitirse siempre, también con el robot real: `run_started` al aceptar `start` y `run_finished` al terminar la corrida. `lap` es opcional: solo se emite si `capabilities.lap_timing = true`, y el robot real v1 declara `false`. El mecanismo de detección de vueltas en el robot real (marcas laterales o cronómetro de meta) queda para una spec futura. Con `lap_timing = false`, el bloque `lap` de `telemetry` MUST estar ausente y `summary.laps`, `best_lap_ms` y `avg_lap_ms` MUST ser `null`. Con `lap_timing = true` y corrida activa, el bloque `lap` MUST estar presente en cada `telemetry` (FR-018).
 - **FR-024a**: Los clientes MUST funcionar correctamente sin recibir nunca `event lap` ni el bloque `lap` de la telemetría.
 - **FR-025**: Una corrida MUST ir desde `start` hasta `stop` o una salida de pista; en ambos casos MUST emitirse exactamente un `run_finished` para ese `run_id`. Tras `off_track`, el `run_finished` MUST llegar inmediatamente después.
 
@@ -225,11 +241,11 @@ traen `battery_v` sin declarar medición de voltaje.
   |---|---|
   | `invalid_json` | El frame no es JSON válido o no es un objeto |
   | `unknown_cmd` | Falta `cmd` o su valor no es un comando del contrato |
-  | `invalid_params` | Faltan campos obligatorios, sobran combinaciones inválidas o un tipo es incorrecto |
+  | `invalid_params` | Faltan campos obligatorios, sobran combinaciones inválidas, un tipo es incorrecto o `set_profile` intenta cambiar un parámetro de `hello` (FR-037) |
   | `out_of_range` | Un valor tiene el tipo correcto pero está fuera de rango (p. ej. `set_rate` con `hz=150`) |
   | `sim_only` | Comando solo-sim enviado al robot real |
-  | `run_active` | El comando no se admite con una corrida activa (`start`, comandos solo-sim) |
-  | `no_run` | `stop` sin corrida activa |
+  | `run_active` | Ver FR-031 y FR-032 |
+  | `no_run` | Ver FR-031 |
   | `unknown_robot` | `robot` de la conexión o `robot_id` de `load` no existe |
   | `unknown_track` | `track` de la conexión no existe |
   | `invalid_track` | La pista de `load_track` no cumple track v1 |
@@ -250,47 +266,50 @@ traen `battery_v` sin declarar medición de voltaje.
   | `set_rate` | `hz` (entero 10–100) | Cambia la frecuencia de telemetría | Sí |
   | `list` | — | Responde `catalog` | Sí (ver FR-026) |
   | `reset` | — | Vuelve el robot a la línea de salida | No (solo-sim) |
-  | `load` | `robot_id` (string) | Cambia el perfil de robot | No (solo-sim) |
-  | `set_profile` | `measured` (objeto parámetro → valor o `null`) | Fija o borra valores medidos del perfil | No (solo-sim) |
+  | `load` | `robot_id` (string) | Cambia el perfil de robot; el servidor reenvía `hello` y luego `config` (FR-013). Es el único comando que cambia datos de `hello` | No (solo-sim) |
+  | `set_profile` | `measured` (objeto parámetro → valor o `null`) | Fija o borra valores medidos de parámetros físicos y de calibración (FR-037) | No (solo-sim) |
   | `load_track` | `track` (pista track v1) | Carga la pista en el mundo | No (solo-sim) |
 
 - **FR-030**: El robot real MUST responder `error` a todo comando solo-sim.
-- **FR-031**: `start` con corrida activa y `stop` sin corrida activa MUST responder `error`.
-- **FR-032**: Los comandos solo-sim MUST responder `error` si hay una corrida activa.
+- **FR-031**: `start` con corrida activa MUST responder `error` `run_active` (la corrida en curso continúa sin cambios), y `stop` sin corrida activa MUST responder `error` `no_run` (no se emite `run_finished`).
+- **FR-032**: Los comandos solo-sim (`reset`, `load`, `set_profile`, `load_track`) MUST responder `error` `run_active` si hay una corrida activa; se deben enviar con la corrida detenida.
 - **FR-033**: `run_id` MUST ser único dentro de la sesión; para identificar una corrida fuera de la sesión se usa el par (`session_id`, `run_id`).
 - **FR-034**: `set_config` aceptado durante una corrida MUST aplicarse al instante (al comienzo del siguiente paso de control), emitir un `config` nuevo y marcar la corrida con `config_changed = true` en su `run_finished.summary`. El optimizador MUST descartar las corridas con `config_changed = true`.
 
 #### Perfil del robot
 
-- **FR-035**: Cada parámetro del perfil MUST tener la forma `{"default": valor, "measured": valor | null, "source": origen}`, donde `source` describe el origen del valor por defecto (`definido`, `datasheet`, `estimado`, `robot_actual`). El valor efectivo es `measured` si no es `null`; si no, `default`.
+- **FR-035**: Cada parámetro del perfil MUST tener la forma `{"default": valor, "measured": valor | null, "source": origen}`, donde `source` describe el origen del valor por defecto (`defined`, `datasheet`, `estimated`, `current_robot`). El valor efectivo es `measured` si no es `null`; si no, `default`.
 - **FR-036**: El perfil v1 MUST contener al menos estos parámetros:
 
-  | Parámetro | Unidad | Defecto v1 | Origen | En `hello` |
+  | Parámetro | Unidad | Defecto v1 | Origen | Campo en `hello` |
   |---|---|---|---|---|
-  | `id`, `firmware`, `hw_rev` | — | `velocista-01`, `sim-0.1`, `A` | definido | Sí |
-  | `line_sensors`, `adc_bits` | — | 16, 12 | robot_actual | Sí |
-  | `sensor_pitch_m` | m | 0.009525 | datasheet | No |
-  | `sensor_offset_m` (regleta delante del eje) | m | 0.085 | estimado | No |
-  | `adc_white`, `adc_black` | ADC | 200, 3900 | estimado | No |
-  | `adc_noise` | ADC (±) | 60 | estimado | No |
-  | `motors` | — | 2 | robot_actual | Sí |
-  | `max_speed_mps` (a PWM 255) | m/s | 2.8 | estimado | No |
-  | `motor_tau_ms` | ms | 45 | estimado | No |
-  | `wheelbase_m` | m | 0.130 | estimado | No |
-  | `max_lateral_accel_mps2` | m/s² | 9.0 | estimado | No |
-  | `turbine` · `turbine_suction_n` | — · N | `false` · `null` | robot_actual | Sí · No |
-  | `encoders` · `encoder_ticks_per_rev` | — · ticks | `false` · `null` | robot_actual | Sí · No |
-  | `imu` | — | `false` | robot_actual | Sí |
-  | `battery_cells`, `battery_nominal_v` | —, V | 2, 7.4 | estimado | Sí |
-  | `battery_voltage_sense` | — | `true` | estimado | Sí |
-  | `lap_timing` | — | `true` | definido | Sí |
-  | `control_period_ms` | ms | 2 | estimado | No |
+  | `id`, `firmware`, `hw_rev` | — | `velocista-01`, `sim-0.1`, `A` | defined | `robot.id`, `robot.firmware`, `robot.hw_rev` |
+  | `line_sensors`, `adc_bits` | — | 16, 12 | current_robot | `capabilities.line_sensors`, `capabilities.adc_bits` |
+  | `sensor_pitch_m` | m | 0.009525 | datasheet | — |
+  | `sensor_offset_m` (regleta delante del eje) | m | 0.085 | estimated | — |
+  | `adc_white`, `adc_black` | ADC | 200, 3900 | estimated | — |
+  | `adc_noise` | ADC (±) | 60 | estimated | — |
+  | `motors` | — | 2 (fijo en v1) | current_robot | `capabilities.motors` |
+  | `max_speed_mps` (a PWM 255) | m/s | 2.8 | estimated | — |
+  | `motor_tau_ms` | ms | 45 | estimated | — |
+  | `wheelbase_m` | m | 0.130 | estimated | — |
+  | `max_lateral_accel_mps2` | m/s² | 9.0 | estimated | — |
+  | `turbine` · `turbine_suction_n` | — · N | `false` · `null` | current_robot | `capabilities.turbine` · — |
+  | `encoders` · `encoder_ticks_per_rev` | — · ticks | `false` · `null` | current_robot | `capabilities.encoders` · — |
+  | `imu` | — | `false` | current_robot | `capabilities.imu` |
+  | `battery_cells`, `battery_nominal_v` | —, V | 2, 7.4 | estimated | `capabilities.battery.cells`, `capabilities.battery.nominal_v` |
+  | `battery_voltage_sense` | — | `true` | estimated | `capabilities.battery.voltage_sense` |
+  | `lap_timing` | — | `true` | defined | `capabilities.lap_timing` |
+  | `control_period_ms` | ms | 2 | estimated | — |
 
-- **FR-037**: `set_profile` MUST rechazar con `error` parámetros inexistentes, valores con tipo o rango inválido y cambios a `id`; se aplica todo o nada.
+  Los parámetros con campo en `hello` son **parámetros de `hello`**; el resto son **parámetros
+  físicos y de calibración**.
+
+- **FR-037**: `set_profile` MUST aceptar solo parámetros físicos y de calibración (FR-036): `sensor_pitch_m`, `sensor_offset_m`, `adc_white`, `adc_black`, `adc_noise`, `max_speed_mps`, `motor_tau_ms`, `wheelbase_m`, `max_lateral_accel_mps2`, `turbine_suction_n`, `encoder_ticks_per_rev` y `control_period_ms`. MUST rechazar con `error` `invalid_params` los parámetros de `hello` (`id`, `firmware`, `hw_rev`, `line_sensors`, `adc_bits`, `motors`, `turbine`, `encoders`, `imu`, `lap_timing`, `battery_cells`, `battery_nominal_v`, `battery_voltage_sense`) y los inexistentes, y con `invalid_params` u `out_of_range` los valores con tipo o rango inválido. Se aplica todo o nada. Para cambiar un parámetro de `hello` hay que cargar otro perfil con `load`.
 
 #### Formato de pista (track v1)
 
-- **FR-038**: Una pista track v1 MUST incluir: `id` (string), `v` (entero, `1`), `name` (string), `units` (`"m"`), `board` (`width`, `height`: números > 0, m), `line_width` (número > 0, m), `closed` (booleano), `centerline` (array de ≥ 2 puntos `[x, y]` en m, muestreados cada 0,005 m), `gaps` (array, posiblemente vacío, de `{at, length}` en m), `start` (`{at}` en m) y `rules_profile` (string, perfil de reglamento del trazador, no del robot).
+- **FR-038**: Una pista track v1 MUST incluir: `id` (string), `v` (entero, `1`), `name` (string), `units` (`"m"`), `board` (`width`, `height`: números > 0, m), `line_width` (número > 0, m), `closed` (booleano), `centerline` (array de ≥ 2 puntos `[x, y]` en m, muestreados cada 0,005 m con una tolerancia de ±10 % entre puntos consecutivos, sin contar el tramo de cierre), `gaps` (array, posiblemente vacío, de `{at, length}` en m), `start` (`{at}` en m) y `rules_profile` (string, perfil de reglamento del trazador, no del robot). Las coordenadas están en metros con origen en la esquina inferior izquierda del tablero, x hacia la derecha e y hacia arriba (el mismo sistema que el trazador); el tablero ocupa `[0, width] × [0, height]`.
 - **FR-039**: Todo `at` MUST estar entre 0 y la longitud total de `centerline`; todo punto de `centerline` MUST estar dentro de `board`; los `gaps` MUST NOT superponerse.
 - **FR-040**: `marks` (marcas laterales) queda reservado como campo opcional para una versión posterior; en v1 su presencia no invalida la pista pero no tiene efecto.
 

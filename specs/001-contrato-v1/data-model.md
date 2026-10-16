@@ -43,9 +43,19 @@ referencia los nombres de parámetro de `robot-profile.schema.json`.
 
 Objeto con un miembro por parámetro de la tabla FR-036. Cada miembro tiene la forma
 `profile_param`: `{default, measured, source}`, con `measured` del mismo tipo que `default` o
-`null`, y `source ∈ {definido, datasheet, estimado, robot_actual}`. Los rangos de cada `default`
-y `measured` se declaran por parámetro (p. ej. `wheelbase_m` > 0). Valor efectivo:
-`measured ?? default` (FR-035). `id` no admite `measured` (FR-037).
+`null`, y `source ∈ {defined, datasheet, estimated, current_robot}`. Los rangos de cada `default`
+y `measured` se declaran por parámetro (p. ej. `wheelbase_m` > 0; `motors` fijo en 2). Valor
+efectivo: `measured ?? default` (FR-035). `id` no admite `measured`.
+
+Los parámetros se dividen en dos grupos (FR-036, FR-037):
+
+- **Parámetros de `hello`** (13): `id`, `firmware`, `hw_rev`, `line_sensors`, `adc_bits`,
+  `motors`, `turbine`, `encoders`, `imu`, `lap_timing`, `battery_cells`, `battery_nominal_v`,
+  `battery_voltage_sense`. Solo cambian con `load`, que reenvía `hello` y `config`.
+- **Parámetros físicos y de calibración** (12): `sensor_pitch_m`, `sensor_offset_m`,
+  `adc_white`, `adc_black`, `adc_noise`, `max_speed_mps`, `motor_tau_ms`, `wheelbase_m`,
+  `max_lateral_accel_mps2`, `turbine_suction_n`, `encoder_ticks_per_rev`, `control_period_ms`.
+  Son los únicos que acepta `set_profile` (`propertyNames` en `commands/set_profile`).
 
 ## Reglas de validación
 
@@ -63,8 +73,10 @@ Tipos, obligatorios, enums y rangos fijos de las tablas de la spec, más:
 | `lap` solo con corrida | `telemetry` | `if running=false then not required lap` |
 | `set_config` no vacío | `commands/set_config` | `anyOf` de `required: [controller]`, `[params]`, `[base_speed]` |
 | Subtipo de evento | `event` | `if event=lap then required lap, lap_ms`, etc. |
-| `best_lap_ms`/`avg_lap_ms` | `event` (`run_finished`) | `null` si `laps` es `0` o `null` |
+| `best_lap_ms`/`avg_lap_ms` | `event` (`run_finished`) | `if laps ∈ {0, null} then null else entero > 0` |
 | `measured` en `id` | `robot-profile` | `measured: null` fijo |
+| Motores en v1 | `hello`, `robot-profile` | `capabilities.motors` y `motors.default` `{"const": 2}` |
+| `set_profile` solo físicos | `commands/set_profile` | `propertyNames` `enum` con los 12 parámetros físicos y de calibración |
 
 ### Capa 2 — Contextual (requiere `hello`)
 
@@ -83,6 +95,20 @@ Tipos, obligatorios, enums y rangos fijos de las tablas de la spec, más:
 | `summary_laps_without_timing` | `event` (`run_finished`) | `laps`, `best_lap_ms` o `avg_lap_ms` no nulos con `lap_timing = false` | FR-024 |
 | `catalog_robot_real` | `catalog` | `source = "robot"` y `robots ≠ [robot.id]` o `tracks ≠ []` | FR-026 |
 | `track_id_robot_real` | `config` | `source = "robot"` y `track_id ≠ null` | FR-015 |
+| `odometry_missing` | `telemetry` | `odometry` ausente con `encoders` o `imu` | FR-018, FR-019 |
+| `odometry_encoder_fields_missing` | `telemetry` | `distance_m` o `speed_mps` ausente con `encoders = true` (y `odometry` presente) | FR-019 |
+| `odometry_imu_fields_missing` | `telemetry` | `heading_rad` ausente con `imu = true` (y `odometry` presente) | FR-019 |
+| `battery_v_missing` | `telemetry` | `battery_v` ausente con `voltage_sense = true` | FR-018 |
+| `sim_truth_missing` | `telemetry` | `sim_truth` ausente con `source = "sim"` | FR-020 |
+| `lap_missing` | `telemetry` | bloque `lap` ausente con `running = true` y `lap_timing = true` | FR-018, FR-024 |
+
+Las reglas `*_missing` informan el `path` del campo que falta (p. ej. `/battery_v`), con la misma
+convención que `required`. Si falta `odometry` entera, solo se informa `odometry_missing`, no las
+reglas por campo.
+
+El contexto es siempre el **último** `hello` de la sesión: tras un `load` el servidor envía un
+`hello` nuevo y los mensajes siguientes se validan con él (FR-013). Elegir qué `hello` pasar es
+responsabilidad de quien llama al validador.
 
 Si el mensaje no es `hello` y no se entrega `hello`, el validador aplica solo la capa 1 e informa
 que las reglas contextuales no se evaluaron (no es un error).
@@ -92,9 +118,9 @@ que las reglas contextuales no se evaluaron (no es un error).
 | Regla (`rule`) | Condición de fallo | Requisito |
 |---|---|---|
 | `track_at_range` | algún `gaps[].at` o `start.at` fuera de [0, longitud de `centerline`] | FR-039 |
-| `track_point_outside_board` | algún punto fuera de `[0, width] × [0, height]` | FR-039 |
+| `track_point_outside_board` | algún punto fuera de `[0, width] × [0, height]` (origen en la esquina inferior izquierda, x a la derecha, y hacia arriba) | FR-038, FR-039 |
 | `track_gaps_overlap` | dos `gaps` con intervalos `[at, at + length)` superpuestos | FR-039 |
-| `track_sampling` | distancia entre puntos consecutivos fuera de 0,005 m ± 10 % | FR-038 |
+| `track_sampling` | distancia entre puntos consecutivos fuera de 0,005 m ± 10 % (sin contar el tramo de cierre) | FR-038 |
 
 La longitud de `centerline` es la suma de distancias entre puntos consecutivos (más el tramo de
 cierre si `closed = true`).
@@ -113,9 +139,12 @@ las enuncia.
 
 ```text
 (conexión) ──► abierta ──hello, config──► activa ──cierre de conexión──► terminada
+                                           │  ▲
+                                           └──┘ load aceptado (sin corrida) ──► hello, config
 ```
 
-Solo hay una sesión por conexión; al terminar se pierde la corrida activa (FR-007).
+Solo hay una sesión por conexión; al terminar se pierde la corrida activa (FR-007). Un `load`
+aceptado reemplaza el `hello` vigente de la sesión (FR-013).
 
 ### Corrida
 

@@ -67,9 +67,11 @@ alcance. Esta fase registra las decisiones de diseño que el plan necesita y que
   solo si `running = true` (`if`/`then`/`else`), `set_config` con al menos un campo
   (`anyOf` de `required`), forma del perfil `{default, measured, source}`.
 - **Validador contextual** (necesita `hello`): longitud de `sensors`, cota `2^adc_bits − 1`, cota
-  superior de `line_position`, `error = line_position − centro`, `odometry` y sus campos según
-  `encoders`/`imu`, `battery_v` según `voltage_sense`, `sim_truth` según `source`, bloque `lap`,
-  `event lap` y `summary.laps…` según `lap_timing`.
+  superior de `line_position`, `error = line_position − centro`, presencia obligatoria o prohibida
+  de `odometry` y sus campos según `encoders`/`imu`, de `battery_v` según `voltage_sense`, de
+  `sim_truth` según `source` y del bloque `lap` según `lap_timing` y `running`, más `event lap` y
+  `summary.laps…` según `lap_timing`. El contexto es el último `hello` de la sesión (cambia tras
+  `load`).
 - **Semántica de pista** (sin contexto): `at` ≤ longitud de `centerline`, puntos dentro de
   `board`, `gaps` sin superposición, muestreo ≈ 0,005 m.
 - **Razón**: el usuario pidió explícitamente un validador contextual pequeño; mantener en el

@@ -53,6 +53,8 @@ uv run python -c "import json; from pathlib import Path; from velocista_sim.cont
 | US4-1: `sim_truth` con robot real | `invalid/telemetry/sim-truth-robot.json` | `sim_truth_without_sim` |
 | US4-2: `odometry` sin encoders ni IMU | `invalid/telemetry/odometry-without-capability.json` | `odometry_without_capability` |
 | US4-5: `lap` sin `lap_timing` | `invalid/telemetry/lap-without-timing.json` | `lap_without_timing` |
+| US4-6: encoders declarados sin `odometry` | `invalid/telemetry/odometry-missing.json` | `odometry_missing` |
+| US3-5: `set_profile` de un parámetro de `hello` | `invalid/commands/set_profile/change-line-sensors.json` | `enum` en `/measured` |
 
 Los escenarios de US2 y US3 que requieren un servidor (secuencias `start`/`stop`, `load_track`
 aceptado, orden de los mensajes) no se verifican en esta feature: aquí solo se validan los
