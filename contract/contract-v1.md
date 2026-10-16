@@ -479,6 +479,72 @@ Ejemplo abreviado (PDF v1.1, §7):
  "rules_profile": "lgr2026"}
 ```
 
+## Paridad simulador–robot real
+
+Un cliente conectado al robot real observa los mismos mensajes, con la misma semántica y las
+mismas unidades, que conectado al simulador. Las únicas diferencias son los
+[elementos solo-sim](#elementos-solo-sim) y los campos que dependen de lo que el robot declara
+en `hello`. Esta sección resume qué MUST emitir y qué MUST NOT emitir el firmware.
+
+### Campos condicionados
+
+Cada campo condicionado está presente **si y solo si** se cumple su condición: con la condición,
+MUST estar en **cada** mensaje; sin ella, MUST estar ausente (FR-018). El validador informa
+cada caso con la regla indicada.
+
+| Campo | Obligatorio si | Prohibido si | Reglas |
+|---|---|---|---|
+| `telemetry.odometry` | `encoders = true` o `imu = true` | `encoders = false` e `imu = false` | `odometry_missing` · `odometry_without_capability` |
+| `telemetry.odometry.distance_m`, `.speed_mps` | `encoders = true` | `encoders = false` | `odometry_encoder_fields_missing` · `odometry_encoder_fields` |
+| `telemetry.odometry.heading_rad` | `imu = true` | `imu = false` | `odometry_imu_fields_missing` · `odometry_imu_fields` |
+| `telemetry.battery_v` | `battery.voltage_sense = true` | `battery.voltage_sense = false` | `battery_v_missing` · `battery_without_sense` |
+| `telemetry.sim_truth` | `source = "sim"` | `source = "robot"` | `sim_truth_missing` · `sim_truth_without_sim` |
+| `telemetry.lap` | `lap_timing = true` y `running = true` | `lap_timing = false`, o `running = false` | `lap_missing` · `lap_without_timing` (y `not` del schema sin corrida) |
+| `telemetry.run_id` | `running = true` | `running = false` | `required` · `not` (schema) |
+| `event` con `event = "lap"` | — (cuando se completa una vuelta) | `lap_timing = false` | `lap_without_timing` |
+| `summary.laps` | entero (no `null`) si `lap_timing = true` | no `null` si `lap_timing = false` | `summary_laps_missing` · `summary_laps_without_timing` |
+| `summary.best_lap_ms`, `.avg_lap_ms` | entero > 0 si `laps ≥ 1` | no `null` si `laps` es `0` o `null`, o si `lap_timing = false` | `type`/`const` (schema) · `summary_laps_without_timing` |
+
+Si falta `odometry` entera, o llega sin capacidad, solo se informa la regla del bloque, no las
+de sus campos. Las reglas de longitud y rango de `sensors`, `line_position` y `error`
+(`sensors_length`, `sensor_range`, `line_position_range`, `error_consistency`) también dependen
+de `hello` y valen igual para ambos.
+
+El contexto es siempre el **último** `hello` de la sesión. Con el robot real ese `hello` no
+cambia (no acepta `load`).
+
+### Comportamiento del robot real
+
+- **Motores**: v1 admite exactamente dos motores; `capabilities.motors` es `2` y `telemetry.motors`
+  trae `left` y `right`.
+- **Comandos solo-sim** (`reset`, `load`, `set_profile`, `load_track`): responde `error` con
+  `code = "sim_only"` y `cmd` con el comando; nada cambia (FR-030).
+- **`list`**: responde `catalog` con `robots = [su propio robot.id]` y `tracks = []`
+  (FR-026; reglas `catalog_robot_real`).
+- **`config.track_id`** y **`summary.track_id`**: siempre `null`, porque el robot real no conoce
+  pistas (FR-015; regla `track_id_robot_real` en `config`).
+- **Parámetros de conexión** `robot` y `track`: los ignora (FR-006).
+- **Corridas**: emite `run_started` al aceptar `start` y `run_finished` al terminar, igual que el
+  simulador (FR-024). En v1 declara `lap_timing = false`: no emite `event lap` ni el bloque `lap`,
+  y `summary.laps`, `best_lap_ms` y `avg_lap_ms` son `null`. La detección de vueltas (marcas
+  laterales o cronómetro de meta) queda para una spec futura.
+- **Desconexión**: si pierde la conexión durante una corrida, MUST detener los motores. La corrida
+  se pierde y no se emite `run_finished` (FR-007).
+
+### Requisitos para los clientes
+
+- Los clientes MUST funcionar correctamente sin recibir nunca `event lap` ni el bloque `lap` de
+  la telemetría (FR-024a).
+- Los clientes MUST poder funcionar ignorando por completo `sim_truth` y los comandos solo-sim.
+- Ningún comportamiento que deba funcionar con el robot real puede depender de `sim_truth`
+  (FR-020).
+
+Ejemplos del robot real: [`valid/hello/robot-real.json`](./examples/valid/hello/robot-real.json),
+[`valid/telemetry/robot-real.json`](./examples/valid/telemetry/robot-real.json),
+[`valid/event/robot-real-run-finished.json`](./examples/valid/event/robot-real-run-finished.json),
+[`valid/catalog/robot-real.json`](./examples/valid/catalog/robot-real.json) y
+[`valid/config/robot-real.json`](./examples/valid/config/robot-real.json).
+
 ## Cambios respecto del PDF v1.1
 
 El borrador 1.1 no tenía implementaciones, así que estos cambios se consideran correcciones del
