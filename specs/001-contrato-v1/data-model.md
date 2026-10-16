@@ -93,6 +93,7 @@ Tipos, obligatorios, enums y rangos fijos de las tablas de la spec, más:
 | `sim_truth_without_sim` | `telemetry` | `sim_truth` presente con `source = "robot"` | FR-020 |
 | `lap_without_timing` | `telemetry`, `event` | bloque `lap` o `event lap` con `lap_timing = false` | FR-024 |
 | `summary_laps_without_timing` | `event` (`run_finished`) | `laps`, `best_lap_ms` o `avg_lap_ms` no nulos con `lap_timing = false` | FR-024 |
+| `summary_laps_missing` | `event` (`run_finished`) | `laps = null` con `lap_timing = true` | FR-024 |
 | `catalog_robot_real` | `catalog` | `source = "robot"` y `robots ≠ [robot.id]` o `tracks ≠ []` | FR-026 |
 | `track_id_robot_real` | `config` | `source = "robot"` y `track_id ≠ null` | FR-015 |
 | `odometry_missing` | `telemetry` | `odometry` ausente con `encoders` o `imu` | FR-018, FR-019 |

@@ -126,8 +126,15 @@ alcance. Esta fase registra las decisiones de diseño que el plan necesita y que
 - **Decisión**: el protocolo sigue en `v = 1`. El documento `contract/contract-v1.md` lleva su
   propia revisión **1.2** (el PDF era el borrador 1.1) y una sección de cambios respecto del PDF:
   `capabilities.lap_timing`, `capabilities.battery.voltage_sense`, `error.code`, `error.cmd`,
-  `summary.config_changed`, forma unificada de `summary.config` y `v` obligatorio en `event`.
-- **Razón**: todos los cambios son aditivos excepto `summary.config` y `v` en `event`; como el PDF
+  `summary.config_changed`, forma unificada de `summary.config`, `v` obligatorio en `event` y, tras
+  los análisis del 2026-10-16: `hello` reenviado tras `load` (único comando que cambia datos de
+  `hello`), `set_profile` limitado a parámetros físicos y de calibración, `capabilities.motors` fijo
+  en 2, valores de `source` del perfil en inglés (el PDF usaba `"estimado"`), campos condicionados
+  obligatorios cuando su capacidad está declarada, `summary.laps` no nulo con `lap_timing = true` y
+  `best_lap_ms`/`avg_lap_ms` coherentes con `laps`, origen de coordenadas de la pista y tolerancia
+  de muestreo de ±10 %.
+- **Razón**: los cambios son aditivos o restringen casos que el PDF no definía, excepto
+  `summary.config`, `v` en `event` y los valores de `source`; como el PDF
   era borrador y no hay implementaciones, se consideran correcciones del borrador, no ruptura.
 
 ## R10. Integración continua

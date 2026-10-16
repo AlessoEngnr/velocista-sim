@@ -47,7 +47,7 @@ servidor sin ralentizarlos.
 - Los campos desconocidos se aceptan (FR-005, R4).
 
 **Scale/Scope**: 6 mensajes, 4 subtipos de evento, 9 comandos, perfil y pista. Unos 18 schemas y
-del orden de 80 ejemplos. 3 capas de reglas, con 23 reglas no expresables en schema (19 contextuales y 4 de pista).
+más de 120 ejemplos. 3 capas de reglas, con 24 reglas no expresables en schema (20 contextuales y 4 de pista).
 
 ## Constitution Check
 
