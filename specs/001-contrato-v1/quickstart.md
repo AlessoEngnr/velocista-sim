@@ -45,7 +45,7 @@ uv run python -c "import json; from pathlib import Path; from velocista_sim.cont
 
 | Escenario (spec) | Cómo verificarlo | Esperado |
 |---|---|---|
-| US1-2: sensor 5000 | `invalid/telemetry/sensor-out-of-range.json` | `maximum` en `/sensors/…` |
+| US1-2: sensor 5000 con `adc_bits = 12` | `invalid/telemetry/sensor-out-of-range.json` | `sensor_range` en `/sensors/3` (el schema solo acota a 16 bits; la cota de 12 bits es contextual) |
 | US1-4: 15 sensores con hello de 16 | `invalid/telemetry/sensors-length.json` | `sensors_length` |
 | US1-5: campo desconocido | `valid/telemetry/unknown-field.json` | válido |
 | US2-6: `set_rate` 150 | `invalid/commands/set_rate/hz-too-high.json` | `maximum` en `/hz` |
