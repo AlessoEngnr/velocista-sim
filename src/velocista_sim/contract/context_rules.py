@@ -38,7 +38,7 @@ def _sensor_violations(telemetry: dict, capabilities: dict) -> list[Violation]:
             if value > adc_max:
                 violations.append(Violation(
                     "sensor_range", f"/sensors/{index}",
-                    f"el sensor {index} vale {value} y con adc_bits = {adc_bits} el máximo es {adc_max}",
+                    f"el sensor {index} vale {value} y con adc_bits = {adc_bits}, el máximo es {adc_max}",
                 ))
 
     if _is_int(line_sensors):

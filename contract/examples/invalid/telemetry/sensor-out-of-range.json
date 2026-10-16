@@ -1,5 +1,5 @@
 {
-  "description": "Con adc_bits = 12 el máximo es 4095; el sensor 3 vale 5000 (escenario US1-2).",
+  "description": "Con adc_bits = 12, el máximo es 4095; el sensor 3 vale 5000 (escenario US1-2).",
   "hello": "sim-default",
   "message": {
     "type": "telemetry",
