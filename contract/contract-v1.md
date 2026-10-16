@@ -269,7 +269,73 @@ como error genérico.
 
 ## Comandos
 
-<!-- Se completa con las historias de usuario 2 y 3. -->
+Comandos cliente→servidor. Todos llevan `cmd` y, opcionalmente, `v` (que debe ser `1`). Solo
+configuran u ordenan corridas: ningún comando actúa como control en tiempo real (FR-029).
+Schemas en [`schemas/commands/`](./schemas/commands/); ejemplos en
+[`valid/commands/`](./examples/valid/commands/) e [`invalid/commands/`](./examples/invalid/commands/),
+una carpeta por comando.
+
+### Reglas comunes
+
+- Un comando rechazado responde `error` (con `cmd` si el comando es identificable) y **no
+  produce ningún efecto** en la sesión (FR-027, FR-028).
+- El `code` del `error` sigue la tabla de [`error`](#error): JSON inválido → `invalid_json`;
+  `cmd` ausente o desconocido → `unknown_cmd`; `v` distinto de `1` → `unsupported_version`; campo
+  obligatorio ausente, combinación inválida o tipo incorrecto → `invalid_params`; tipo correcto
+  pero fuera de rango → `out_of_range`.
+- Todo cambio aceptado de configuración, frecuencia, perfil o pista se confirma con un `config`
+  completo (FR-016).
+
+### Comandos generales
+
+Valen igual en el simulador y en el robot real.
+
+| `cmd` | Campos | Efecto | Robot real | Schema |
+|---|---|---|---|---|
+| `start` | — | Inicia una corrida con un `run_id` nuevo y emite `event run_started` | Sí | [`start`](./schemas/commands/start.schema.json) |
+| `stop` | — | Detiene la corrida activa y emite `event run_finished` | Sí | [`stop`](./schemas/commands/stop.schema.json) |
+| `set_config` | `controller` (`"pid"`), `params` (`kp`, `ki`, `kd`: números ≥ 0), `base_speed` (entero, PWM 0–255); todos opcionales, al menos uno | Cambia la configuración del controlador; los campos omitidos (y los parámetros omitidos dentro de `params`) conservan su valor. Responde `config` | Sí | [`set_config`](./schemas/commands/set_config.schema.json) |
+| `set_rate` | `hz` (entero, 10–100) | Cambia la frecuencia de telemetría. Responde `config` con el nuevo `rate_hz` | Sí | [`set_rate`](./schemas/commands/set_rate.schema.json) |
+| `list` | — | Responde `catalog` | Sí: `robots = [su propio id]`, `tracks = []` (FR-026) | [`list`](./schemas/commands/list.schema.json) |
+
+Ejemplos:
+
+```json
+{"cmd": "start"}
+{"cmd": "set_config", "controller": "pid", "params": {"kp": 0.045, "ki": 0, "kd": 0.9}, "base_speed": 180}
+{"cmd": "set_config", "params": {"kp": 0.05}}
+{"cmd": "set_rate", "hz": 20}
+```
+
+### Corridas
+
+- `start` con una corrida activa responde `error` `run_active`; la corrida en curso continúa sin
+  cambios. `stop` sin corrida activa responde `error` `no_run`, y no se emite `run_finished`
+  (FR-031).
+- Cada corrida recibe un `run_id` único dentro de la sesión. Para identificar una corrida fuera de
+  la sesión (p. ej. al guardarla en el backend) se usa el par (`session_id`, `run_id`) (FR-033).
+- Al iniciarse la corrida se emite `run_started` y la telemetría pasa a `running = true` con ese
+  `run_id`. Al terminar (por `stop` o por salida de pista) se emite exactamente un
+  `run_finished` y la telemetría vuelve a `running = false`, sin `run_id` (FR-025).
+- `set_config` aceptado durante una corrida se aplica **al instante** (al comienzo del siguiente
+  paso de control) y emite un `config` nuevo. La corrida queda marcada con
+  `summary.config_changed = true`, y `summary.config` sigue siendo la configuración con la que
+  empezó. El optimizador MUST descartar las corridas con `config_changed = true` (FR-034).
+
+Estados de una corrida:
+
+```text
+          start (acepta)                    stop  ─────────────┐
+ inactiva ───────────────► activa ──────────────────────────────┤──► run_finished ──► inactiva
+   ▲  run_started emitido  │  off_track ──► (off_track emitido) ┘
+   │                       │  set_config ──► config_changed = true (sigue activa)
+   │                       │  desconexión ──► sesión terminada (sin run_finished)
+   └── start en activa ──► error run_active · stop en inactiva ──► error no_run
+```
+
+Ciclo del optimizador: `set_config` → `start` → (telemetría, eventos) → `run_finished` →
+leer `summary` → siguiente `set_config`. Como `summary.config` tiene la misma forma que
+`set_config`, se puede reenviar tal cual (agregándole `"cmd": "set_config"`).
 
 ## Perfil del robot
 
