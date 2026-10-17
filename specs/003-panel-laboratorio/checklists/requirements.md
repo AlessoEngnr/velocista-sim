@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain (queda FR-045: vueltas objetivo)
+- [x] No [NEEDS CLARIFICATION] markers remain
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
@@ -42,4 +42,4 @@
 - Diseño de referencia (`docs/design/reference.png`): se toman solo paleta, tipografía, acentos y
   grilla; los requisitos visuales (FR-038 a FR-044, SC-008 a SC-011) describen roles y criterios
   verificables, no implementación. Los elementos del diseño que el contrato no permite figuran en
-  "Referencia visual" como fuera de alcance; el total de vueltas queda como pregunta (FR-045).
+  "Referencia visual" como fuera de alcance; el total de vueltas se resolvió como campo opcional de vueltas objetivo (FR-045).

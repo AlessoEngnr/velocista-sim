@@ -58,7 +58,7 @@ cualquier animación que no sea la actualización de los propios valores.
 | Cámara en vivo / onboard | El contrato no transmite video | — |
 | Team Radio (comunicaciones de voz/texto) | No existe en el contrato | Tarjeta **Registro**: eventos (`run_started`, `lap`, `off_track`, `run_finished`) y `error`, con `t_ms` |
 | Mapa de la pista con su trazado, sectores S1/S2/S3 y tiempos por sector | La geometría de la pista no viaja por el contrato (FR-021 del contrato) y no hay sectores | Tarjeta **Rastro**: trayectoria de `sim_truth` sin pista de fondo |
-| Total de vueltas de la carrera (`42 / 78`) | El contrato no define una cantidad de vueltas objetivo; la corrida termina con `stop` o salida de pista | Solo `lap.n` [ver FR-045] |
+| Total de vueltas de la carrera (`42 / 78`) | El contrato no define una cantidad de vueltas objetivo; la corrida termina con `stop` o salida de pista | `lap.n / vueltas objetivo`, un campo opcional del panel que envía `stop` al alcanzarlo (FR-045) |
 | Velocidad en km/h, acelerador, freno, RPM | No existen en el contrato | `sim_truth.speed_mps` (m/s) y PWM de cada motor |
 | Foto, número y equipo del piloto | No existen en el contrato | Datos del robot de `hello` (`robot.id`, `firmware`, `hw_rev`) |
 | Botones de ajustes de cuenta, auriculares y cerrar sesión | No hay cuentas ni audio | — |
@@ -106,11 +106,15 @@ actualizándose y al menos una vuelta en el historial, pulsar Detener y ver el r
 6. **Given** una corrida activa, **When** el robot se sale de la pista, **Then** el panel señala la
    salida de pista (`event off_track` con su `reason`) y muestra el resumen del `run_finished` que
    le sigue.
-7. **Given** una sesión sin corrida, **When** el usuario pulsa Reiniciar, **Then** el panel envía
+7. **Given** el campo de vueltas objetivo en 3, **When** la corrida completa la tercera vuelta,
+   **Then** el panel envía `stop` una sola vez y muestra el resumen; **Given** el mismo objetivo,
+   **When** el usuario pulsa Detener en la vuelta 1, **Then** la corrida termina ahí; **Given** el
+   campo vacío, **When** pasan las vueltas, **Then** el panel nunca envía `stop` por su cuenta.
+8. **Given** una sesión sin corrida, **When** el usuario pulsa Reiniciar, **Then** el panel envía
    `reset` y el rastro se limpia; el robot vuelve a la salida.
-8. **Given** cualquier momento, **When** el servidor responde `error`, **Then** el panel lo muestra
+9. **Given** cualquier momento, **When** el servidor responde `error`, **Then** el panel lo muestra
    en pantalla con su `code`, su `message` y el `cmd` rechazado, sin perder el resto del estado.
-9. **Given** una sesión abierta, **When** se corta la conexión, **Then** el panel muestra el estado
+10. **Given** una sesión abierta, **When** se corta la conexión, **Then** el panel muestra el estado
    "desconectado", deja de habilitar los comandos y ofrece reconectar; al reconectar trata la
    nueva sesión como nueva (nuevo `hello`, nuevo `config`, rastro limpio).
 
@@ -414,10 +418,21 @@ comprobar el error sin cambios; borrar el valor y comprobar que queda como "por 
   Robot y pista y de Calibración, el historial largo y los resúmenes pueden desplazarse dentro de su
   tarjeta. En pantallas más angostas, las columnas se apilan en el orden derecha (control),
   izquierda, centro, sin desplazamiento horizontal.
-- **FR-045**: Vueltas objetivo. [NEEDS CLARIFICATION: el diseño muestra el total de vueltas
-  (`42 / 78`), pero el contrato no define vueltas objetivo. ¿El panel debe permitir fijar una
-  cantidad de vueltas y enviar `stop` automáticamente al alcanzarla (decisión del cliente,
-  permitida por el contrato), o solo mostrar `lap.n` y dejar el `stop` manual?]
+- **FR-045**: Vueltas objetivo. La tarjeta Control MUST ofrecer un campo opcional "vueltas
+  objetivo" (entero ≥ 1). Es una regla del panel, no del contrato: el panel la aplica enviando
+  `stop` como cualquier cliente.
+  - Vacío significa sin límite: la corrida sigue hasta `stop` manual o salida de pista.
+  - Con un valor, cuando las vueltas completadas de la corrida activa (`event lap` /
+    `telemetry.lap.n`) alcanzan el objetivo, el panel MUST enviar `stop` una sola vez para esa
+    corrida.
+  - Detener MUST estar disponible siempre durante la corrida y puede cortarla antes de llegar al
+    objetivo.
+  - El campo puede cambiarse durante la corrida; si el nuevo valor ya es menor o igual que las
+    vueltas completadas, el panel envía `stop` de inmediato. Un valor no entero o menor que 1 se
+    señala en el campo y no se aplica.
+  - La barra superior y la tarjeta de Vueltas muestran `lap.n / objetivo` (como `42 / 78` en el
+    diseño), o solo `lap.n` si no hay objetivo.
+  - Si `lap_timing = false` (sin vueltas), el campo se oculta.
 
 ### Key Entities
 
