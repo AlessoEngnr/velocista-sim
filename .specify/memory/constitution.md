@@ -123,10 +123,4 @@ en la práctica.
 - Cada plan (`/speckit-plan`) y cada revisión de código MUST verificar el cumplimiento de estos
   principios; cualquier excepción MUST justificarse por escrito en el plan.
 
-## Pendientes
-
-- **JSON Schemas del contrato**: el contrato existe hoy solo como PDF
-  (`contract/contrato-v1.1-velocista-sim.pdf`). El principio VII exige un JSON Schema por cada
-  tipo de mensaje en `contract/`; deben extraerse del contrato antes de implementar mensajes.
-
-**Version**: 1.1.0 | **Ratified**: 2026-10-16 | **Last Amended**: 2026-10-16
+**Version**: 1.1.1 | **Ratified**: 2026-10-16 | **Last Amended**: 2026-10-16
