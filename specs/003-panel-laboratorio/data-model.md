@@ -45,6 +45,10 @@ PanelState
  closed ── Reconectar / cambiar pista ──► connecting   (se reinicia todo menos `log`)
 ```
 
+Al reconectar (botón Reconectar o cambio de pista) se reinicia todo el `PanelState` salvo
+`log`: incluidos `summaries`, `trail`, `run`, `pending`, `calibration`, `lapTarget.stopSentFor`
+y los contadores de `TelemetryView`. El registro se conserva hasta recargar la página (R15).
+
 Los comandos solo se envían con `status = "open"`; con otro estado los controles están
 deshabilitados (borde "comandos con la conexión cerrada").
 
@@ -132,7 +136,7 @@ Desde `event run_started` hasta `event run_finished`.
 El `summary` de `run_finished` tal cual (contrato) más el `run_id` y el `t_ms` del evento:
 `laps`, `best_lap_ms`, `avg_lap_ms`, `off_tracks`, `track_id`, `config` (`controller`, `params`,
 `base_speed`), `config_changed`. Se antepone a `summaries` (tope 50). Los `null` se muestran como
-`—` (FR-022).
+`—` (FR-022). La lista es de la sesión: se borra al reconectar (R15).
 
 ### Trail (research R7)
 

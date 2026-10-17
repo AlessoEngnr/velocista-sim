@@ -19,8 +19,11 @@ para entregar archivos estáticos. No transporta datos de la simulación.
 - Montar el panel no cambia el comportamiento de `/health` ni de `/ws` (FR-001); los tests
   existentes de ambos siguen pasando sin modificaciones.
 - La página y sus recursos no hacen pedidos a otros orígenes (sin CDN, sin fuentes externas, sin
-  analítica). Los archivos estáticos no contienen `http://` ni `https://` salvo en comentarios
-  explicativos.
+  analítica). Los archivos estáticos no contienen ninguna URL literal `http://` ni `https://`
+  (tampoco en comentarios), con la única excepción de los espacios de nombres XML que empiezan
+  con `http://www.w3.org/` (p. ej. `xmlns` de SVG), que no generan pedidos. Tampoco contienen
+  `ws://` ni `wss://` literales: la URL del WebSocket se arma con `location` (research R4). Un
+  test (`tests/integration/test_panel_static.py`) lo verifica.
 - El único pedido de datos que hace la página es el WebSocket a `/ws` del mismo origen.
 - No hay autenticación (igual que `/ws`).
 - Sin dependencias nuevas de ejecución: `StaticFiles` viene con Starlette/FastAPI.

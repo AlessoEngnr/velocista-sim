@@ -21,6 +21,7 @@ Guía para comprobar de punta a punta que el panel funciona. Detalles de diseño
 uv run pytest                                      # todo (incluye tests de navegador si Chromium está instalado)
 uv run pytest tests/integration/test_panel_static.py  # `/` sirve la página; /health y /ws intactos
 uv run pytest -m browser                           # solo Playwright
+uv run pytest -m slow tests/browser/test_panel_load.py  # carga: 30 s a 100 Hz (no corre en CI)
 ```
 
 Resultado esperado:
@@ -34,6 +35,9 @@ Resultado esperado:
   válidos (FR-037).
 - `tests/browser/test_panel_robot.py`: con un "robot real" simulado (`route_web_socket`), sin
   errores de consola y con los controles solo-sim ocultos (SC-006).
+- `tests/browser/test_panel_load.py` (marcadores `browser` y `slow`, excluido de `uv run pytest`
+  y de la CI por `-m 'not slow'`): 30 s de corrida a 100 Hz con `seq-lost == 0` y controles que
+  siguen respondiendo (SC-003, versión corta).
 
 Si Chromium no está instalado, los tests `browser` aparecen como **omitidos** con el comando de
 instalación en el motivo. En la CI (`VELOCISTA_REQUIRE_BROWSER=1`) eso es un fallo.
@@ -68,6 +72,7 @@ Abrir `http://localhost:8000/` en el navegador (ventana de 1440 × 900 o mayor).
 | 17 | Cortar el servidor (Ctrl+C) | `DESCONECTADO` y botón Reconectar; los controles se deshabilitan | US1-10 |
 | 18 | `VELOCISTA_MAX_SESSIONS=1`, abrir dos pestañas | la segunda muestra "Servidor lleno" y permite reintentar | borde "servidor lleno" |
 | 19 | Revisión visual lado a lado con `docs/design/reference.png` | misma paleta, acento magenta, rótulos en mayúsculas tenues, tres columnas; sin imágenes, degradados ni animaciones; números monoespaciados que no "saltan" | SC-009, SC-010 |
+| 20 | **Antes de abrir el PR**: frecuencia = 100 Hz, Iniciar y dejar correr **5 minutos** (vueltas objetivo vacío); mover `kp` y `base_speed` al final | `seq-lost` sigue en 0, el rastro se dibuja sin cortes, los sliders y Detener responden sin trabas y el `config` se confirma en < 1 s | SC-003 |
 
 ## 3. En Railway
 

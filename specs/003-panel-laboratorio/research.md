@@ -243,13 +243,14 @@ para el plan.
   `DESCONECTADO` y un botón **Reconectar**. Si el cierre trae código 1013 (sesiones al máximo) el
   mensaje es "Servidor lleno: no se pudo abrir la sesión. Reintentar más tarde"; con 1008, "El
   servidor cerró la sesión porque el panel no leía a tiempo". Al reconectar se descarta todo el
-  estado de la sesión anterior (rastro, vueltas, cola de pendientes, calibración), pero se
-  conservan los resúmenes y el registro en pantalla hasta recargar.
+  estado de la sesión anterior: rastro, vueltas, cola de pendientes, calibración, contadores de
+  `seq` y **también los resúmenes de corridas**. Solo el **registro** de eventos y errores se
+  conserva en pantalla hasta recargar la página.
 
   > Nota: la spec pide tratar la nueva sesión "como nueva (nuevo `hello`, nuevo `config`,
-  > rastro limpio)". Los resúmenes de corridas son "de la sesión"; se **limpian** también al
-  > reconectar para no mezclar `run_id` de sesiones distintas. El registro se conserva (incluye
-  > el aviso de desconexión).
+  > rastro limpio)" y FR-022 define los resúmenes como "de la sesión"; por eso se borran al
+  > reconectar, para no mezclar `run_id` de sesiones distintas. El registro se conserva porque
+  > incluye el aviso de desconexión y lo ocurrido antes de reconectar.
 - **Razón**: FR-004 y el borde "servidor lleno"; reintentar en bucle contra un servidor lleno
   solo empeora la situación.
 
