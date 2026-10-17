@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.143.2",
+    "jsonschema>=4.26.0",
     "pyyaml>=6.0.3",
     "uvicorn[standard]>=0.54.0",
 ]
@@ -22,6 +23,9 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "jsonschema>=4.26.0",
     "pytest>=9.1.1",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
