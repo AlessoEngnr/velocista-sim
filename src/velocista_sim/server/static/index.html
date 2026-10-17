@@ -2,9 +2,177 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Panel de laboratorio · velocista-sim</title>
+  <link rel="stylesheet" href="panel.css">
+  <script type="module" src="js/main.js"></script>
 </head>
 <body>
-  <h1>Panel de laboratorio</h1>
+  <!-- Estructura y anclas data-testid: specs/003-panel-laboratorio/contracts/ui-hooks.md -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">VELOCISTA · LAB</span>
+    </div>
+
+    <div class="connection">
+      <span class="status" data-testid="conn-status" data-state="connecting" aria-live="polite">CONECTANDO</span>
+      <span class="conn-message" data-role="conn-message"></span>
+      <button type="button" class="btn" data-testid="btn-reconnect" hidden>Reconectar</button>
+    </div>
+
+    <dl class="metrics">
+      <div class="metric metric-primary">
+        <dt>CORRIDA</dt>
+        <dd>
+          <span class="status" data-testid="run-status" data-state="idle" aria-live="polite">SIN CORRIDA</span>
+          <span class="value value-id" data-testid="run-id">—</span>
+        </dd>
+      </div>
+      <div class="metric metric-primary" data-requires="laps">
+        <dt>VUELTA</dt>
+        <dd>
+          <span class="value value-count" data-testid="lap-n">—</span><span class="value value-target" data-testid="lap-target"></span>
+          <span class="value value-time" data-testid="lap-current">—</span>
+        </dd>
+      </div>
+      <div class="metric" data-requires="battery">
+        <dt>BATERÍA</dt>
+        <dd><span class="value value-volts" data-testid="battery">—</span></dd>
+      </div>
+      <div class="metric">
+        <dt>FRECUENCIA</dt>
+        <dd><span class="value value-hz" data-testid="rate-hz">—</span></dd>
+      </div>
+      <div class="metric">
+        <dt>PISTA</dt>
+        <dd><span class="value value-id" data-testid="track-id">—</span></dd>
+      </div>
+      <div class="metric">
+        <dt>SEQ</dt>
+        <dd><span class="value value-seq" data-testid="seq">—</span></dd>
+      </div>
+      <div class="metric">
+        <dt>PERDIDAS</dt>
+        <dd><span class="value value-count" data-testid="seq-lost">—</span></dd>
+      </div>
+    </dl>
+
+    <details class="robot-selector">
+      <summary>
+        <span class="label">ROBOT</span>
+        <span class="value value-id" data-testid="robot-id">—</span>
+        <span class="tag" data-testid="source">—</span>
+      </summary>
+      <dl class="session-data">
+        <div><dt>SESIÓN</dt><dd data-testid="session-id">—</dd></div>
+        <div><dt>FIRMWARE</dt><dd data-testid="firmware">—</dd></div>
+        <div><dt>HW_REV</dt><dd data-testid="hw-rev">—</dd></div>
+        <div><dt>CAPACIDADES</dt><dd data-testid="capabilities">—</dd></div>
+      </dl>
+    </details>
+  </header>
+
+  <main class="columns">
+    <div class="column column-left">
+      <section class="card card-sensors" aria-labelledby="title-sensors">
+        <h2 class="card-title" id="title-sensors">REGLETA</h2>
+        <div class="canvas-box canvas-sensors">
+          <canvas data-testid="sensors-canvas" aria-label="Lecturas de la regleta de sensores"></canvas>
+        </div>
+        <dl class="readouts">
+          <div><dt>POSICIÓN</dt><dd class="value value-primary" data-testid="line-position">—</dd></div>
+          <div><dt>ERROR</dt><dd class="value value-primary" data-testid="error">—</dd></div>
+        </dl>
+        <p class="line-lost" data-testid="line-lost" aria-live="polite"></p>
+      </section>
+
+      <section class="card card-controller" aria-labelledby="title-controller">
+        <h2 class="card-title" id="title-controller">CONTROLADOR</h2>
+        <dl class="readouts readouts-grid">
+          <div><dt>P</dt><dd class="value" data-testid="pid-p">—</dd></div>
+          <div><dt>I</dt><dd class="value" data-testid="pid-i">—</dd></div>
+          <div><dt>D</dt><dd class="value" data-testid="pid-d">—</dd></div>
+          <div><dt>SALIDA</dt><dd class="value" data-testid="pid-out">—</dd></div>
+        </dl>
+      </section>
+
+      <section class="card card-motors" aria-labelledby="title-motors">
+        <h2 class="card-title" id="title-motors">MOTORES</h2>
+        <dl class="readouts">
+          <div><dt>IZQUIERDO</dt><dd class="value value-primary" data-testid="pwm-left">—</dd></div>
+          <div><dt>DERECHO</dt><dd class="value value-primary" data-testid="pwm-right">—</dd></div>
+        </dl>
+      </section>
+
+      <section class="card card-log card-fill" aria-labelledby="title-log">
+        <h2 class="card-title" id="title-log">REGISTRO</h2>
+        <ul class="list log" data-testid="log"></ul>
+      </section>
+    </div>
+
+    <div class="column column-center">
+      <section class="card card-trail card-fill" data-requires="sim" aria-labelledby="title-trail">
+        <div class="card-head">
+          <h2 class="card-title" id="title-trail">RASTRO</h2>
+          <button type="button" class="btn btn-small" data-testid="btn-trail-clear">Limpiar rastro</button>
+        </div>
+        <div class="canvas-box canvas-trail">
+          <canvas data-testid="trail-canvas" data-points="0" aria-label="Recorrido del robot según sim_truth"></canvas>
+        </div>
+        <dl class="readouts readouts-strip">
+          <div><dt>VELOCIDAD</dt><dd class="value" data-testid="speed">—</dd></div>
+          <div><dt>DISTANCIA</dt><dd class="value" data-testid="distance">—</dd></div>
+          <div><dt>X</dt><dd class="value" data-testid="pose-x">—</dd></div>
+          <div><dt>Y</dt><dd class="value" data-testid="pose-y">—</dd></div>
+          <div><dt>THETA</dt><dd class="value" data-testid="theta">—</dd></div>
+        </dl>
+      </section>
+      <p class="card notice" data-role="no-sim-truth" hidden>Sin sim_truth: el robot real no informa su posición</p>
+    </div>
+
+    <div class="column column-right">
+      <section class="card card-control" aria-labelledby="title-control">
+        <h2 class="card-title" id="title-control">CONTROL</h2>
+        <div class="run-buttons">
+          <button type="button" class="btn btn-primary" data-testid="btn-start" data-requires-open>Iniciar</button>
+          <button type="button" class="btn" data-testid="btn-stop" data-requires-open>Detener</button>
+          <button type="button" class="btn" data-testid="btn-reset" data-requires="sim" data-requires-open>Reiniciar</button>
+        </div>
+        <div class="field field-inline" data-requires="laps">
+          <label for="lap-target-input">VUELTAS OBJETIVO</label>
+          <input id="lap-target-input" class="input value" type="text" inputmode="numeric"
+                 placeholder="sin límite" data-testid="lap-target-input" data-requires-open>
+        </div>
+
+        <div class="tabs" role="tablist" aria-label="Ajustes">
+          <button type="button" class="tab" role="tab" id="tab-tuning" aria-controls="panel-tuning"
+                  aria-selected="true" data-testid="tab-tuning">AJUSTE</button>
+          <button type="button" class="tab" role="tab" id="tab-robot-track" aria-controls="panel-robot-track"
+                  aria-selected="false" data-testid="tab-robot-track" data-requires="sim">ROBOT Y PISTA</button>
+          <button type="button" class="tab" role="tab" id="tab-calibration" aria-controls="panel-calibration"
+                  aria-selected="false" data-testid="tab-calibration" data-requires="sim">CALIBRACIÓN</button>
+        </div>
+        <div class="tab-panel" role="tabpanel" id="panel-tuning" aria-labelledby="tab-tuning"></div>
+        <div class="tab-panel" role="tabpanel" id="panel-robot-track" aria-labelledby="tab-robot-track" hidden></div>
+        <div class="tab-panel" role="tabpanel" id="panel-calibration" aria-labelledby="tab-calibration" hidden></div>
+      </section>
+
+      <section class="card card-laps" data-requires="laps" aria-labelledby="title-laps">
+        <h2 class="card-title" id="title-laps">VUELTAS</h2>
+        <dl class="readouts readouts-grid">
+          <div><dt>ÚLTIMA</dt><dd class="value" data-testid="lap-last">—</dd></div>
+          <div><dt>MEJOR</dt><dd class="value value-best" data-testid="lap-best">—</dd></div>
+          <div><dt>PROMEDIO</dt><dd class="value" data-testid="lap-avg">—</dd></div>
+        </dl>
+        <ol class="list lap-history" data-testid="lap-history"></ol>
+      </section>
+
+      <section class="card card-runs card-fill" aria-labelledby="title-runs">
+        <h2 class="card-title" id="title-runs">CORRIDAS</h2>
+        <ul class="list summaries" data-testid="summaries"></ul>
+      </section>
+    </div>
+  </main>
 </body>
 </html>

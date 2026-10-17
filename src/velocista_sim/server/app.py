@@ -1,17 +1,21 @@
-"""Aplicación FastAPI: WebSocket `/ws` con una sesión independiente por conexión (FR-001, FR-026)
-y `GET /health` para el healthcheck de Railway (FR-042, contracts/http-health.md)."""
+"""Aplicación FastAPI: WebSocket `/ws` con una sesión independiente por conexión (FR-001, FR-026),
+`GET /health` para el healthcheck de Railway (FR-042, contracts/http-health.md) y el panel de
+laboratorio estático en `/` (specs/003-panel-laboratorio, contracts/http-panel.md)."""
 
 from __future__ import annotations
 
 import json
 import logging
+import mimetypes
 import os
 import time
+from pathlib import Path
 from typing import Awaitable, Callable
 
 import anyio
 from fastapi import FastAPI, WebSocket
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketDisconnect
 
 from .catalog import load_catalog
@@ -23,6 +27,13 @@ log = logging.getLogger(__name__)
 
 CLOSE_POLICY_VIOLATION = 1008
 CLOSE_TRY_AGAIN_LATER = 1013
+
+STATIC_DIR = Path(__file__).parent / "static"
+
+# En Windows `mimetypes` lee el registro y `.js` puede quedar como `text/plain`; el navegador
+# rechaza módulos ES con ese tipo (research R2).
+mimetypes.add_type("text/javascript", ".js")
+mimetypes.add_type("text/css", ".css")
 
 
 def create_app(settings: Settings | None = None, clock: Callable[[], float] | None = None) -> FastAPI:
@@ -71,6 +82,8 @@ def create_app(settings: Settings | None = None, clock: Callable[[], float] | No
         finally:
             app.state.sessions -= 1
 
+    # Al final: `/health` y `/ws` se resuelven antes que el montaje del panel (research R1).
+    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="panel")
     return app
 
 
