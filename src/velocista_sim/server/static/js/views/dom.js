@@ -20,3 +20,31 @@ export function setAttr(element, name, value) {
 export function setHidden(element, hidden) {
   if (element && element.hidden !== hidden) element.hidden = hidden;
 }
+
+/** Valor de un token de color de `panel.css` (p. ej. `--accent`). */
+export function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+/**
+ * Ajusta el tamaño interno del canvas a su tamaño en pantalla por `devicePixelRatio` y devuelve
+ * el contexto ya escalado, con el ancho y alto en píxeles CSS.
+ */
+export function fitCanvas(canvas) {
+  const ratio = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+  const pixelWidth = Math.max(1, Math.round(width * ratio));
+  const pixelHeight = Math.max(1, Math.round(height * ratio));
+  if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+  if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
+  const context = canvas.getContext("2d");
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  context.clearRect(0, 0, width, height);
+  return { context, width, height };
+}
+
+/** Llama `onResize` cada vez que el canvas cambia de tamaño en pantalla. */
+export function watchSize(canvas, onResize) {
+  new ResizeObserver(onResize).observe(canvas);
+}

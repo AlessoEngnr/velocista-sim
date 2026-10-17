@@ -30,13 +30,13 @@
         </dd>
       </div>
       <div class="metric metric-primary" data-requires="laps">
-        <dt>VUELTA</dt>
+        <dt>VUELTAS</dt>
         <dd>
           <span class="value value-count" data-testid="lap-n">—</span><span class="value value-target" data-testid="lap-target"></span>
           <span class="value value-time" data-testid="lap-current">—</span>
         </dd>
       </div>
-      <div class="metric" data-requires="battery">
+      <div class="metric">
         <dt>BATERÍA</dt>
         <dd><span class="value value-volts" data-testid="battery">—</span></dd>
       </div>
@@ -135,9 +135,9 @@
       <section class="card card-control" aria-labelledby="title-control">
         <h2 class="card-title" id="title-control">CONTROL</h2>
         <div class="run-buttons">
-          <button type="button" class="btn btn-primary" data-testid="btn-start" data-requires-open>Iniciar</button>
-          <button type="button" class="btn" data-testid="btn-stop" data-requires-open>Detener</button>
-          <button type="button" class="btn" data-testid="btn-reset" data-requires="sim" data-requires-open>Reiniciar</button>
+          <button type="button" class="btn btn-primary" data-testid="btn-start">Iniciar</button>
+          <button type="button" class="btn" data-testid="btn-stop">Detener</button>
+          <button type="button" class="btn" data-testid="btn-reset" data-requires="sim">Reiniciar</button>
         </div>
         <div class="field field-inline" data-requires="laps">
           <label for="lap-target-input">VUELTAS OBJETIVO</label>
@@ -161,6 +161,7 @@
       <section class="card card-laps" data-requires="laps" aria-labelledby="title-laps">
         <h2 class="card-title" id="title-laps">VUELTAS</h2>
         <dl class="readouts readouts-grid">
+          <div><dt>EN CURSO</dt><dd class="value" data-role="lap-running">—</dd></div>
           <div><dt>ÚLTIMA</dt><dd class="value" data-testid="lap-last">—</dd></div>
           <div><dt>MEJOR</dt><dd class="value value-best" data-testid="lap-best">—</dd></div>
           <div><dt>PROMEDIO</dt><dd class="value" data-testid="lap-avg">—</dd></div>

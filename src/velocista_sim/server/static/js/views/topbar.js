@@ -1,7 +1,9 @@
-// Barra superior: estado de la conexión, datos del robot y de la sesión, frecuencia y pista
-// vigentes (FR-004, FR-005, FR-038, FR-039).
+// Barra superior: estado de la conexión y de la corrida, métricas en línea (vueltas, batería,
+// seq), datos del robot y de la sesión, frecuencia y pista vigentes (FR-004, FR-005, FR-008,
+// FR-017, FR-019, FR-038, FR-039).
 
-import { MISSING, formatHz } from "../format.js";
+import { MISSING, formatHz, formatSeconds, formatVolts } from "../format.js";
+import { completedLaps } from "../state.js";
 import { byTestId, setAttr, setHidden, setText } from "./dom.js";
 
 const STATUS_TEXT = { connecting: "CONECTANDO", open: "● CONECTADO", closed: "DESCONECTADO" };
@@ -51,4 +53,30 @@ export function renderTopbar(root, state) {
 
   setText(byTestId(root, "rate-hz"), formatHz(state.config?.rate_hz));
   setText(byTestId(root, "track-id"), state.config?.track_id ?? MISSING);
+
+  renderMetrics(root, state);
+}
+
+function renderMetrics(root, state) {
+  const run = state.run;
+  const runStatus = byTestId(root, "run-status");
+  setText(runStatus, run ? "● EN CORRIDA" : "SIN CORRIDA");
+  setAttr(runStatus, "data-state", run ? "running" : "idle");
+  setText(byTestId(root, "run-id"), run?.runId ?? MISSING);
+
+  const telemetry = state.telemetry.last;
+  const lap = run && telemetry?.running ? telemetry.lap : null;
+  setText(byTestId(root, "lap-n"), run ? String(completedLaps(state)) : MISSING);
+  const target = state.lapTarget.value;
+  setText(byTestId(root, "lap-target"), target === null ? "" : ` / ${target}`);
+  setText(byTestId(root, "lap-current"), formatSeconds(lap?.current_ms));
+
+  const battery = byTestId(root, "battery");
+  const batteryVolts = telemetry?.battery_v;
+  setHidden(battery.closest(".metric"), !state.caps.hasBattery || batteryVolts === undefined);
+  setText(battery, formatVolts(batteryVolts));
+
+  const telemetryView = state.telemetry;
+  setText(byTestId(root, "seq"), telemetryView.lastSeq === null ? MISSING : String(telemetryView.lastSeq));
+  setText(byTestId(root, "seq-lost"), telemetryView.lastSeq === null ? MISSING : String(telemetryView.lost));
 }

@@ -568,3 +568,48 @@ dd {
     max-width: calc(100vw - 32px);
   }
 }
+
+/* --- Vueltas y corridas ---------------------------------------------------------------- */
+
+.lap-history {
+  margin-top: 8px;
+}
+
+.lap-history li {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+}
+
+.lap-history .value {
+  color: var(--text);
+  font-size: var(--size-secondary);
+}
+
+.lap-history .value-best {
+  color: var(--best);
+}
+
+.summary-title {
+  margin: 0 0 4px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.summary-values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 20px;
+}
+
+.summary-values div {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.summary-values .value {
+  min-width: 0;
+  font-size: var(--size-secondary);
+}

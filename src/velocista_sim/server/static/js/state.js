@@ -3,7 +3,12 @@
 // contrato: un `case` por `type`. Las vistas solo leen este estado; `main.js` lo actualiza al
 // llegar cada mensaje y marca `dirty` para que se redibuje en el siguiente cuadro.
 
+import { formatSeconds } from "./format.js";
+import { clearTrail, createTrail, pushPoint } from "./trail.js";
+
 const LOG_LIMIT = 50;
+const LAPS_LIMIT = 100;
+const SUMMARIES_LIMIT = 50;
 
 // Comandos que, si se aceptan, responden con `config` (research R5). Solo estos entran a la
 // cola de pendientes; `start`, `stop`, `list` y `reset` no.
@@ -20,7 +25,9 @@ export function createState() {
     pending: [],
     telemetry: { last: null, lastSeq: null, lost: 0, received: 0 },
     run: null,
-    trail: null,
+    lastRun: null,          // la última corrida terminada, para la tarjeta Vueltas
+    finishedRunId: null,    // evita revivir con telemetría atrasada una corrida ya terminada
+    trail: createTrail(),
     lapTarget: { value: null, stopSentFor: null },
     calibration: null,
     summaries: [],
@@ -50,12 +57,13 @@ export function derived(state) {
 export function applyMessage(state, message) {
   if (Number.isInteger(message?.t_ms)) state.lastTMs = message.t_ms;
   switch (message?.type) {
-    // hello: datos del robot y capacidades. Reemplaza al anterior y recalcula los derivados.
-    // Si llega tras un `load`, el pendiente lo resuelve el `config` que viene después.
+    // hello: datos del robot y capacidades. Reemplaza al anterior, recalcula los derivados y
+    // limpia el rastro. Si llega tras un `load`, el pendiente lo resuelve el `config` siguiente.
     case "hello":
       state.hello = message;
       state.caps = derived(state);
       state.connection.sessionId = message.session_id;
+      clearTrail(state.trail);
       return null;
 
     // config: valores confirmados (fuente de verdad de los controles, FR-013). Resuelve como
@@ -65,6 +73,16 @@ export function applyMessage(state, message) {
       const command = state.pending.shift();
       return command ? { command, accepted: true } : null;
     }
+
+    // telemetry: última lectura, saltos de `seq` (FR-019), punto del rastro y estado de corrida.
+    case "telemetry":
+      applyTelemetry(state, message);
+      return null;
+
+    // event: corrida, vueltas, salidas de pista y resúmenes; todos quedan en el registro.
+    case "event":
+      applyEvent(state, message);
+      return null;
 
     // catalog: listas de robots y pistas disponibles.
     case "catalog":
@@ -84,17 +102,120 @@ export function applyMessage(state, message) {
       return { command, accepted: false };
     }
 
-    // telemetry / event: tipos del contrato que se interpretan con la historia US1 (T023);
-    // mientras tanto se ignoran sin aviso.
-    case "telemetry":
-    case "event":
-      return null;
-
     // Tipo desconocido: se ignora y se avisa en el registro.
     default:
       addLog(state, { kind: "warning", tMs: message?.t_ms ?? null, text: `Mensaje ignorado: tipo desconocido ${String(message?.type)}` });
       return null;
   }
+}
+
+function applyTelemetry(state, message) {
+  const telemetry = state.telemetry;
+  if (telemetry.lastSeq !== null) {
+    const gap = message.seq - telemetry.lastSeq - 1;
+    if (gap > 0) telemetry.lost += gap;
+  }
+  telemetry.lastSeq = message.seq;
+  telemetry.last = message;
+  telemetry.received += 1;
+
+  // El rastro es el recorrido de la corrida: fuera de corrida solo se mueve la pose, para que
+  // Reiniciar deje el rastro vacío aunque la telemetría en reposo siga trayendo `sim_truth`.
+  const truth = message.sim_truth;
+  if (truth) {
+    if (message.running) pushPoint(state.trail, truth.x, truth.y, truth.theta);
+    else state.trail.pose = { x: truth.x, y: truth.y, theta: truth.theta };
+  }
+
+  // Si se perdió `run_started` o `run_finished`, la telemetría manda (data-model.md, ObservedRun).
+  if (message.running && message.run_id && message.run_id !== state.run?.runId
+      && message.run_id !== state.finishedRunId) {
+    startRun(state, message.run_id);
+  } else if (!message.running && state.run) {
+    state.run = null;
+  }
+}
+
+function startRun(state, runId) {
+  state.run = { runId, laps: [], bestLapMs: null, lastLapMs: null, avgLapMs: null, offTracks: [] };
+  state.lastRun = null;
+}
+
+function applyEvent(state, message) {
+  switch (message.event) {
+    case "run_started":
+      if (state.run?.runId !== message.run_id) startRun(state, message.run_id);
+      addLog(state, { kind: "event", tMs: message.t_ms, text: `▶ corrida ${message.run_id} iniciada` });
+      break;
+
+    case "lap": {
+      if (state.run?.runId !== message.run_id) startRun(state, message.run_id);
+      const run = state.run;
+      run.laps.unshift({ n: message.lap, lapMs: message.lap_ms });
+      if (run.laps.length > LAPS_LIMIT) run.laps.length = LAPS_LIMIT;
+      run.lastLapMs = message.lap_ms;
+      run.bestLapMs = Math.min(...run.laps.map((lap) => lap.lapMs));
+      run.avgLapMs = Math.round(run.laps.reduce((sum, lap) => sum + lap.lapMs, 0) / run.laps.length);
+      addLog(state, { kind: "event", tMs: message.t_ms, text: `vuelta ${message.lap} · ${formatSeconds(message.lap_ms)}` });
+      break;
+    }
+
+    case "off_track":
+      state.run?.offTracks.push({ tMs: message.t_ms, reason: message.reason });
+      addLog(state, { kind: "event", tMs: message.t_ms, text: `✕ FUERA DE PISTA (${message.reason})` });
+      break;
+
+    case "run_finished": {
+      state.summaries.unshift({ run_id: message.run_id, t_ms: message.t_ms, ...message.summary });
+      if (state.summaries.length > SUMMARIES_LIMIT) state.summaries.length = SUMMARIES_LIMIT;
+      state.lastRun = state.run?.runId === message.run_id ? state.run : null;
+      state.run = null;
+      state.finishedRunId = message.run_id;
+      const laps = message.summary.laps === null ? "" : ` · ${message.summary.laps} vueltas`;
+      addLog(state, { kind: "event", tMs: message.t_ms, text: `■ corrida ${message.run_id} terminada${laps}` });
+      break;
+    }
+
+    default:
+      addLog(state, { kind: "warning", tMs: message.t_ms, text: `Evento ignorado: ${String(message.event)}` });
+  }
+}
+
+/** Vueltas completadas en la corrida activa, según `event lap` y `telemetry.lap.n`. */
+export function completedLaps(state) {
+  if (!state.run) return 0;
+  const fromEvents = state.run.laps[0]?.n ?? 0;
+  const last = state.telemetry.last;
+  const fromTelemetry = last?.running && last.run_id === state.run.runId ? (last.lap?.n ?? 0) : 0;
+  return Math.max(fromEvents, fromTelemetry);
+}
+
+/**
+ * Fija las vueltas objetivo desde el texto del campo: vacío = sin límite, o un entero ≥ 1.
+ * Devuelve si el texto es válido; si no lo es, el objetivo vigente no cambia (research R16).
+ */
+export function setLapTarget(state, text) {
+  const trimmed = text.trim();
+  if (trimmed === "") {
+    state.lapTarget.value = null;
+    return true;
+  }
+  if (!/^\d+$/.test(trimmed) || Number(trimmed) < 1) return false;
+  state.lapTarget.value = Number(trimmed);
+  return true;
+}
+
+/** `true` si hay que enviar el `stop` automático: objetivo alcanzado y aún no enviado. */
+export function shouldAutoStop(state) {
+  return state.run !== null
+    && state.lapTarget.value !== null
+    && completedLaps(state) >= state.lapTarget.value
+    && state.lapTarget.stopSentFor !== state.run.runId;
+}
+
+/** Recuerda que la corrida activa ya recibió su `stop` automático (una sola vez por `run_id`). */
+export function markAutoStop(state) {
+  state.lapTarget.stopSentFor = state.run.runId;
 }
 
 /** Encola un comando enviado si es de los que responden con `config` (research R5). */
@@ -120,8 +241,8 @@ export function addLog(state, entry) {
 
 /**
  * Descarta la sesión anterior al reconectar (botón Reconectar o cambio de pista): todo vuelve a
- * su valor inicial, incluidos los resúmenes de corridas, menos el registro, que se conserva hasta
- * recargar la página (research R15).
+ * su valor inicial, incluidos rastro, contadores de `seq` y resúmenes de corridas, menos el
+ * registro, que se conserva hasta recargar la página (research R15).
  */
 export function resetSession(state) {
   const log = state.log;
