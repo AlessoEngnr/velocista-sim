@@ -1,4 +1,5 @@
-"""Aplicación FastAPI: WebSocket `/ws` con una sesión independiente por conexión (FR-001, FR-026)."""
+"""Aplicación FastAPI: WebSocket `/ws` con una sesión independiente por conexión (FR-001, FR-026)
+y `GET /health` para el healthcheck de Railway (FR-042, contracts/http-health.md)."""
 
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ from typing import Awaitable, Callable
 
 import anyio
 from fastapi import FastAPI, WebSocket
+from fastapi.responses import JSONResponse
 from starlette.websockets import WebSocketDisconnect
 
 from .catalog import load_catalog
@@ -20,6 +22,7 @@ from .settings import Settings
 log = logging.getLogger(__name__)
 
 CLOSE_POLICY_VIOLATION = 1008
+CLOSE_TRY_AGAIN_LATER = 1013
 
 
 def create_app(settings: Settings | None = None, clock: Callable[[], float] | None = None) -> FastAPI:
@@ -33,24 +36,40 @@ def create_app(settings: Settings | None = None, clock: Callable[[], float] | No
     app = FastAPI(title="velocista-sim")
     app.state.settings = settings
     app.state.catalog = catalog
+    app.state.sessions = 0
+
+    @app.get("/health")
+    async def health() -> JSONResponse:
+        sessions = app.state.sessions
+        full = sessions >= settings.max_sessions
+        body = {"status": "full" if full else "ok", "sessions": sessions, "max_sessions": settings.max_sessions}
+        return JSONResponse(body, status_code=503 if full else 200)
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket) -> None:
         await websocket.accept()
-        session = Session(
-            catalog, settings,
-            robot_id=websocket.query_params.get("robot"),
-            track_id=websocket.query_params.get("track"),
-        )
-        queue = OutboundQueue()
-        for message in session.open():
-            queue.put(message)
-        pacer = Pacer(session, clock, queue)
-        log.info("sesión %s abierta", session.session_id)
+        if app.state.sessions >= settings.max_sessions:
+            log.warning("sesiones al máximo (%d): se rechaza una conexión con 1013", settings.max_sessions)
+            await websocket.close(code=CLOSE_TRY_AGAIN_LATER)
+            return
+        app.state.sessions += 1
         try:
-            await _serve(websocket, session, pacer, queue)
+            session = Session(
+                catalog, settings,
+                robot_id=websocket.query_params.get("robot"),
+                track_id=websocket.query_params.get("track"),
+            )
+            queue = OutboundQueue()
+            for message in session.open():
+                queue.put(message)
+            pacer = Pacer(session, clock, queue)
+            log.info("sesión %s abierta", session.session_id)
+            try:
+                await _serve(websocket, session, pacer, queue)
+            finally:
+                log.info("sesión %s cerrada", session.session_id)
         finally:
-            log.info("sesión %s cerrada", session.session_id)
+            app.state.sessions -= 1
 
     return app
 
