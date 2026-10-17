@@ -33,7 +33,7 @@ en memoria, sin persistencia.
 inyectado; núcleo de sesión probado sin E/S; todo mensaje recibido se valida con
 `velocista_sim.contract.validate_message` contra el último `hello` (research R10). La prueba de
 tiempo real (SC-004) lleva el marcador `slow`, excluido por defecto (`addopts = "-m 'not slow'"`)
-y ejecutado en CI como paso aparte (`uv run pytest -m slow`).
+que no se corre en CI: se ejecuta solo a mano con `uv run pytest -m slow`.
 
 **Target Platform**: contenedor Linux en Railway (Dockerfile con imagen oficial de uv y Python
 3.12); desarrollo local en Windows/Linux.
@@ -128,6 +128,9 @@ config/
 ├── robots/velocista-01.json # Perfil (copia del ejemplo velocista-01-default del contrato)
 └── tracks/oval-01.json      # Pista por defecto track v1 (estadio, sin cortes)
 
+tools/
+└── gen_oval.py              # Genera config/tracks/oval-01.json (reproducible)
+
 examples/
 └── client.py                # Cliente de ejemplo (script PEP 723 con dependencia websockets)
 
@@ -138,13 +141,18 @@ tests/
 ├── unit/
 │   ├── test_world_*.py      # pista, sensores, física, vueltas, salida de pista
 │   ├── test_robot_*.py      # línea y PID
+│   ├── test_world_performance.py # tasa de pasos del núcleo (mínimo para SC-004)
+│   ├── test_robot_*.py      # línea y PID
+│   ├── test_catalog.py      # carga y validación de config/
 │   ├── test_commands.py     # mapeo de errores
+│   ├── test_pacer.py        # tandas de pasos y cola de salida con descarte
 │   └── test_architecture.py # imports prohibidos (world↔robot, reloj, RNG global)
 ├── integration/
 │   ├── test_session_core.py # núcleo sin E/S: corridas, determinismo SC-003, SC-005, SC-007
 │   ├── test_ws_session.py   # TestClient: US1 (P1)
 │   ├── test_ws_sim_only.py  # TestClient: US2 (P2)
-│   └── test_health_client.py# /health y examples/client.py contra uvicorn local (US3)
+│   ├── test_health_client.py# /health y examples/client.py contra uvicorn local (US3)
+│   └── test_message_coverage.py # todos los type, event y code (salvo sim_only), autónomo
 └── slow/
     └── test_realtime_rate.py# SC-004 (marcador slow)
 

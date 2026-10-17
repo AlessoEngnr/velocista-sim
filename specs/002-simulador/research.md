@@ -192,8 +192,9 @@ batería) se fijaron con un prototipo descartable de la física (scratchpad, no 
     `run_finished` por `run_id`; `off_track` seguido de `run_finished`; ningún mensaje con
     `centerline`). Cualquier violación hace fallar el test (principio VII, SC-002).
   - Los mismos chequeos se aplican a los mensajes del núcleo `Session` en los tests sin E/S.
-  - Un test de cobertura comprueba que los tests emitieron al menos una vez cada `type` y cada
-    `event` y cada `code` de error alcanzable en el simulador (todos menos `sim_only`).
+  - Un test de cobertura autónomo (no depende del orden ni de otros tests) corre un guion fijo
+    y comprueba que se emiten y validan al menos una vez cada `type`, cada `event` y cada `code`
+    de error alcanzable en el simulador (todos menos `sim_only`).
 - **Razón**: es lo pedido (TestClient + `velocista_sim.contract`) y mantiene la suite rápida.
 - **Alternativas**: solo tests de núcleo (no prueban el transporte); tiempo real en todos los
   tests (suite de minutos). **Dependencia nueva de dev**: `uv add --dev httpx` (requerida por
@@ -229,8 +230,8 @@ batería) se fijaron con un prototipo descartable de la física (scratchpad, no 
     (1,50; 1,25) en un tablero de 3,00 × 2,50 m, rectas de 1,50 m y radio 0,60 m
     (L ≈ 6,770 m, 1354 puntos cada ≈ 5,000 mm), `line_width` 0,019, sin `gaps`,
     `start.at = 0,10` sobre la recta inferior (sentido antihorario), `rules_profile` `"lgr2026"`.
-    Se genera con el mismo procedimiento que `oval-small` del contrato (script de una vez, no
-    versionado) y se versiona solo el JSON. No se usa `oval-small` tal cual como pista por
+    Se genera con el mismo procedimiento que `oval-small` del contrato, con el script versionado
+    `tools/gen_oval.py`, y se versionan el script y el JSON (regenerable byte a byte). No se usa `oval-small` tal cual como pista por
     defecto porque sus curvas de 0,25 m saturan el agarre con la config por defecto (frágil ante
     un `max_lateral_accel_mps2` medido menor) y tiene un corte, y la spec pide un óvalo sin
     cortes; `oval-small` sí se reutiliza en los tests por `load_track` (cortes, SC-005).
