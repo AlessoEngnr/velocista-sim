@@ -35,10 +35,10 @@ docstrings, comentarios y `error.message` en español (constitución, flujo de d
 
 **Purpose**: dependencias, configuración de pytest y esqueleto de paquetes.
 
-- [ ] T001 Agregar dependencias con uv: `uv add numpy` (lecturas vectorizadas, research R3) y `uv add --dev httpx websockets` (TestClient y cliente de extremo a extremo, research R10/R14); verificar que `pyproject.toml` y `uv.lock` quedan actualizados
-- [ ] T002 Configurar pytest en `pyproject.toml`: registrar el marcador `slow` ("prueba de tiempo real, lenta") y cambiar `addopts` a `"-ra -m 'not slow'"`; `.github/workflows/tests.yml` no cambia: la prueba `slow` no se corre en CI, solo a mano con `uv run pytest -m slow`
-- [ ] T003 [P] Crear los paquetes vacíos con docstring en español: `src/velocista_sim/world/__init__.py`, `src/velocista_sim/robot/__init__.py`, `src/velocista_sim/server/__init__.py`
-- [ ] T004 [P] Crear las carpetas de tests con `__init__.py` vacío donde haga falta para importar el helper: `tests/support/__init__.py`, `tests/integration/`, `tests/slow/`
+- [X] T001 Agregar dependencias con uv: `uv add numpy` (lecturas vectorizadas, research R3) y `uv add --dev httpx websockets` (TestClient y cliente de extremo a extremo, research R10/R14); verificar que `pyproject.toml` y `uv.lock` quedan actualizados
+- [X] T002 Configurar pytest en `pyproject.toml`: registrar el marcador `slow` ("prueba de tiempo real, lenta") y cambiar `addopts` a `"-ra -m 'not slow'"`; `.github/workflows/tests.yml` no cambia: la prueba `slow` no se corre en CI, solo a mano con `uv run pytest -m slow`
+- [X] T003 [P] Crear los paquetes vacíos con docstring en español: `src/velocista_sim/world/__init__.py`, `src/velocista_sim/robot/__init__.py`, `src/velocista_sim/server/__init__.py`
+- [X] T004 [P] Crear las carpetas de tests con `__init__.py` vacío donde haga falta para importar el helper: `tests/support/__init__.py`, `tests/integration/`, `tests/slow/`
 
 ---
 
