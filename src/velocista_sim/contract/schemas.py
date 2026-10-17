@@ -36,10 +36,12 @@ def load_schemas(schema_dir: Path | None = None) -> SchemaStore:
 
     El resultado se cachea por carpeta: los schemas se leen una sola vez por proceso.
     """
-    directory = Path(schema_dir) if schema_dir is not None else _default_schema_dir()
-    return _load(directory.resolve())
+    if schema_dir is None:
+        return _load(_default_schema_dir())
+    return _load(Path(schema_dir).resolve())
 
 
+@functools.cache
 def _default_schema_dir() -> Path:
     for parent in Path(__file__).resolve().parents:
         candidate = parent / "contract" / "schemas"

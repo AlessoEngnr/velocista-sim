@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 
 from support.contract_client import is_event
-from support.session_driver import SessionDriver, events, of_type
+from support.session_driver import SessionDriver, events, of_type, oval_small_track
 
 LAP_LIMIT_STEPS = 9000  # 18 s simulados
 
@@ -329,3 +329,163 @@ def test_rejections_have_no_effect_sc007() -> None:
     assert not of_type(b.messages, "error")
     others_a = [m for m in _without_session_id(a.messages) if m["type"] != "error"]
     assert others_a == _without_session_id(b.messages)
+
+
+# --- US2: comandos solo-sim sin E/S ---------------------------------------------------------
+
+
+def test_load_resends_hello_and_config_and_keeps_settings() -> None:
+    driver = SessionDriver()
+    driver.command("set_config", params={"kp": 0.05}, base_speed=170)
+    driver.command("set_rate", hz=20)
+    driver.command("set_profile", measured={"wheelbase_m": 0.128})
+    _start(driver)
+    driver.run(300)
+    driver.command("stop")
+    emitted = driver.command("load", robot_id="velocista-01")
+    hello, config = emitted[0], emitted[1]
+    assert hello["type"] == "hello" and hello["robot"]["id"] == "velocista-01"
+    assert hello["session_id"] == driver.opening[0]["session_id"]
+    assert config["type"] == "config"
+    assert config["params"]["kp"] == 0.05 and config["base_speed"] == 170
+    assert config["rate_hz"] == 20 and config["track_id"] == "oval-01"
+    assert driver.session.profile["wheelbase_m"]["measured"] is None
+    assert driver.session.world.params.wheelbase_m == 0.13
+    truth = of_type(driver.run(60), "telemetry")[-1]["sim_truth"]
+    assert truth["x"] == pytest.approx(0.85, abs=1e-6) and truth["y"] == pytest.approx(0.65, abs=1e-6)
+
+
+def test_load_unknown_robot() -> None:
+    driver = SessionDriver()
+    errors = of_type(driver.command("load", robot_id="no-existe"), "error")
+    assert [(e["code"], e["cmd"]) for e in errors] == [("unknown_robot", "load")]
+    assert len(of_type(driver.messages, "hello")) == 1
+
+
+def test_set_profile_changes_physics() -> None:
+    plain, measured = SessionDriver(), SessionDriver()
+    emitted = measured.command("set_profile", measured={"wheelbase_m": 0.128})
+    assert [m["type"] for m in emitted] == ["config"]
+    plain.run(1)
+    assert measured.session.world.params.wheelbase_m == 0.128
+    assert measured.session.effective["wheelbase_m"] == 0.128
+    for driver in (plain, measured):
+        _start(driver)
+        driver.run(1500)
+    truth_plain = of_type(plain.messages, "telemetry")[-1]["sim_truth"]
+    truth_measured = of_type(measured.messages, "telemetry")[-1]["sim_truth"]
+    assert truth_plain != truth_measured
+
+
+def test_set_profile_does_not_move_the_robot() -> None:
+    driver = SessionDriver()
+    _start(driver)
+    driver.run(400)
+    driver.command("stop")
+    driver.run(200)
+    before = of_type(driver.messages, "telemetry")[-1]["sim_truth"]
+    driver.command("set_profile", measured={"adc_noise": 10})
+    after = of_type(driver.run(10), "telemetry")[-1]["sim_truth"]
+    assert after["x"] == pytest.approx(before["x"], abs=1e-3)
+    assert after["x"] != pytest.approx(0.85, abs=0.01)
+
+
+def test_set_profile_null_clears_measured() -> None:
+    driver = SessionDriver()
+    driver.command("set_profile", measured={"wheelbase_m": 0.128, "adc_noise": 0})
+    assert driver.session.world.params.adc_noise == 0
+    driver.command("set_profile", measured={"wheelbase_m": None})
+    assert driver.session.profile["wheelbase_m"]["measured"] is None
+    assert driver.session.world.params.wheelbase_m == 0.13
+    assert driver.session.world.params.adc_noise == 0
+
+
+@pytest.mark.parametrize("measured, code", [
+    ({"line_sensors": 8}, "invalid_params"),
+    ({"wheelbase": 0.128}, "invalid_params"),
+    ({"adc_noise": 1.5}, "invalid_params"),
+    ({"wheelbase_m": 0.128, "adc_noise": -1}, "out_of_range"),
+    ({"wheelbase_m": 0.128, "motor_tau_ms": "rápido"}, "invalid_params"),
+])
+def test_set_profile_rejections_change_nothing(measured: dict, code: str) -> None:
+    driver = SessionDriver()
+    before = driver.session.effective
+    errors = of_type(driver.command("set_profile", measured=measured), "error")
+    assert [(e["code"], e["cmd"]) for e in errors] == [(code, "set_profile")]
+    assert driver.session.effective == before
+    assert driver.session.world.params.wheelbase_m == 0.13
+
+
+def test_load_track_oval_small() -> None:
+    driver = SessionDriver()
+    emitted = driver.command("load_track", track=oval_small_track())
+    assert [m["type"] for m in emitted] == ["config"]
+    assert emitted[0]["track_id"] == "oval-small"
+    catalog = of_type(driver.command("list"), "catalog")[0]
+    assert catalog["tracks"] == ["oval-01", "oval-small"]
+    truth = of_type(driver.run(30), "telemetry")[-1]["sim_truth"]
+    assert truth["x"] == pytest.approx(1.4, abs=1e-6) and truth["y"] == pytest.approx(1.0, abs=1e-6)
+
+
+def test_load_track_invalid_keeps_current_track() -> None:
+    driver = SessionDriver()
+    bad = oval_small_track()
+    bad["gaps"] = [{"at": 1.6, "length": 0.02}, {"at": 1.61, "length": 0.02}]
+    errors = of_type(driver.command("load_track", track=bad), "error")
+    assert [(e["code"], e["cmd"]) for e in errors] == [("invalid_track", "load_track")]
+    _start(driver)
+    driver.run(50)
+    summary = events(driver.command("stop"), "run_finished")[0]["summary"]
+    assert summary["track_id"] == "oval-01"
+
+
+def test_good_pid_laps_oval_small_with_gap_sc005() -> None:
+    driver = SessionDriver()
+    driver.command("load_track", track=oval_small_track())
+    _start(driver)
+    lap, emitted = driver.run_until(is_event("lap"), 5000)
+    assert not events(emitted, "off_track")
+    driver.run(500)
+    summary = events(driver.command("stop"), "run_finished")[0]["summary"]
+    assert summary["laps"] >= 1 and summary["off_tracks"] == 0
+    assert summary["track_id"] == "oval-small"
+
+
+SIM_ONLY_RUNNING = [
+    ("load", {"robot_id": "velocista-01"}),
+    ("set_profile", {"measured": {"wheelbase_m": 0.128}}),
+    ("load_track", {"track": "OVAL_SMALL"}),
+    ("reset", {}),
+]
+
+
+def test_sim_only_commands_with_run_are_rejected_sc007() -> None:
+    a, b = SessionDriver(), SessionDriver()
+    for driver in (a, b):
+        _start(driver)
+        driver.run(500)
+    for cmd, fields in SIM_ONLY_RUNNING:
+        if fields.get("track") == "OVAL_SMALL":
+            fields = {"track": oval_small_track()}
+        a.send(cmd, **fields)
+    errors = of_type(a.run(1), "error")
+    b.run(1)
+    assert [(e["code"], e["cmd"]) for e in errors] == [("run_active", cmd) for cmd, _ in SIM_ONLY_RUNNING]
+    for driver in (a, b):
+        driver.run(800)
+        driver.command("stop")
+    others_a = [m for m in _without_session_id(a.messages) if m["type"] != "error"]
+    assert others_a == _without_session_id(b.messages)
+
+
+def test_connection_parameters() -> None:
+    driver = SessionDriver(track_id="oval-01", robot_id="velocista-01")
+    assert [m["type"] for m in driver.opening] == ["hello", "config"]
+    missing = SessionDriver(robot_id="no-existe", track_id="no-existe")
+    kinds = [(m["type"], m.get("code")) for m in missing.opening]
+    assert kinds == [("hello", None), ("config", None), ("error", "unknown_robot"), ("error", "unknown_track")]
+    assert missing.opening[0]["robot"]["id"] == "velocista-01"
+    assert missing.opening[1]["track_id"] == "oval-01"
+    assert all("cmd" not in m for m in missing.opening[2:])
+    only_track = SessionDriver(track_id="no-existe")
+    assert [m.get("code") for m in only_track.opening] == [None, None, "unknown_track"]

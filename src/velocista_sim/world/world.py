@@ -150,7 +150,8 @@ class World:
             self.lost_distance_m = 0.0
             self.lost_time_ms = 0
         else:
-            self.lost_distance_m += (abs(state.speed) + abs(state.omega) * self.params.sensor_offset_m) * self.DT_S
+            bar_speed = abs(state.speed) + abs(state.omega) * self.params.sensor_offset_m
+            self.lost_distance_m += bar_speed * self.DT_S
             self.lost_time_ms += self.DT_MS
             if self.lost_distance_m > LOST_DISTANCE_M or self.lost_time_ms > LOST_TIME_MS:
                 events.append(OffTrack())

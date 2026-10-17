@@ -16,12 +16,12 @@ from typing import Any
 
 from numpy.random import PCG64, Generator, SeedSequence
 
-from velocista_sim.contract import effective_profile
+from velocista_sim.contract import effective_profile, validate_profile
 from velocista_sim.robot import PidConfig, Robot, RobotParams
 from velocista_sim.world import LapCompleted, OffTrack, TrackGeometry, World, WorldParams
 
 from .catalog import Catalog
-from .commands import CommandError, error_message, parse
+from .commands import RANGE_RULES, CommandError, error_message, parse
 from .settings import Settings
 
 log = logging.getLogger(__name__)
@@ -62,7 +62,9 @@ class ControllerConfig:
         }
 
     def pid(self) -> PidConfig:
-        return PidConfig(kp=float(self.kp), ki=float(self.ki), kd=float(self.kd), base_speed=int(self.base_speed))
+        return PidConfig(
+            kp=float(self.kp), ki=float(self.ki), kd=float(self.kd), base_speed=int(self.base_speed)
+        )
 
 
 @dataclass
@@ -132,6 +134,19 @@ class Session:
         self.run: Run | None = None
         self.run_counter = 0
 
+        self._unknown: list[tuple[str, str]] = []
+        if robot_id is not None and robot_id not in catalog.profiles:
+            self._unknown.append((
+                "unknown_robot",
+                f"el robot «{robot_id}» no está en el catálogo; se usa {settings.default_robot}",
+            ))
+            robot_id = None
+        if track_id is not None and track_id not in catalog.tracks:
+            self._unknown.append((
+                "unknown_track",
+                f"la pista «{track_id}» no está en el catálogo; se usa {settings.default_track}",
+            ))
+            track_id = None
         self.profile = copy.deepcopy(catalog.profiles[robot_id or settings.default_robot])
         self.effective = effective_profile(self.profile)
         self.track = catalog.tracks[track_id or settings.default_track]
@@ -155,9 +170,14 @@ class Session:
         return self.step_index * DT_MS
 
     def open(self) -> list[dict]:
-        """Mensajes de apertura: `hello` y `config`, con `t_ms = 0`."""
+        """Mensajes de apertura con `t_ms = 0`: `hello`, `config` y, si los parámetros de conexión
+        `robot`/`track` no existían, `error unknown_robot` y/o `unknown_track` (FR-037)."""
         self._log_profile("apertura")
-        return [self.hello, self._config_message(0)]
+        opening = [self.hello, self._config_message(0)]
+        opening += [
+            error_message(CommandError(code, None, message), 0) for code, message in self._unknown
+        ]
+        return opening
 
     def submit(self, frame: str) -> None:
         """Encola un frame recibido; se aplica al inicio del próximo paso (FR-032)."""
@@ -259,7 +279,8 @@ class Session:
     def _cmd_list(self, fields: dict, t_ms: int) -> list[dict]:
         tracks = list(self.catalog.tracks)
         tracks += [track_id for track_id in self.session_tracks if track_id not in self.catalog.tracks]
-        return [{"type": "catalog", "v": 1, "t_ms": t_ms, "robots": list(self.catalog.profiles), "tracks": tracks}]
+        return [{"type": "catalog", "v": 1, "t_ms": t_ms,
+                 "robots": list(self.catalog.profiles), "tracks": tracks}]
 
     def _cmd_reset(self, fields: dict, t_ms: int) -> list[dict]:
         if self.run is not None:
@@ -268,19 +289,60 @@ class Session:
         return []
 
     def _cmd_load(self, fields: dict, t_ms: int) -> list[dict]:
-        return self._not_implemented("load", t_ms)
+        if self.run is not None:
+            return self._run_active("load", t_ms)
+        robot_id = fields["robot_id"]
+        if robot_id not in self.catalog.profiles:
+            return self._reject(
+                "unknown_robot", "load", f"el robot «{robot_id}» no está en el catálogo", t_ms
+            )
+        self.profile = copy.deepcopy(self.catalog.profiles[robot_id])
+        self._apply_profile(t_ms)
+        self._robot_to_start()
+        self.hello = self._hello_message(t_ms)
+        self._log_profile("load")
+        return [self.hello, self._config_message(t_ms)]
 
     def _cmd_set_profile(self, fields: dict, t_ms: int) -> list[dict]:
-        return self._not_implemented("set_profile", t_ms)
+        if self.run is not None:
+            return self._run_active("set_profile", t_ms)
+        candidate = copy.deepcopy(self.profile)
+        for name, value in fields["measured"].items():
+            if not isinstance(candidate.get(name), dict):
+                return self._reject(
+                    "invalid_params", "set_profile", f"el perfil no tiene el parámetro «{name}»", t_ms
+                )
+            candidate[name]["measured"] = value
+        result = validate_profile(candidate)
+        if not result.ok:
+            violation = result.violations[0]
+            in_range = all(v.rule in RANGE_RULES for v in result.violations)
+            message = f"set_profile: perfil inválido: {violation.message} (en «{violation.path}»)"
+            return self._reject("out_of_range" if in_range else "invalid_params", "set_profile", message, t_ms)
+        self.profile = candidate
+        self._apply_profile(t_ms)
+        self._log_profile("set_profile")
+        return [self._config_message(t_ms)]
 
     def _cmd_load_track(self, fields: dict, t_ms: int) -> list[dict]:
-        return self._not_implemented("load_track", t_ms)
-
-    def _not_implemented(self, cmd: str, t_ms: int) -> list[dict]:
         if self.run is not None:
-            return self._run_active(cmd, t_ms)
-        log.warning("sesión %s: comando no implementado todavía: %s", self.session_id, cmd)
-        return []
+            return self._run_active("load_track", t_ms)
+        track = fields["track"]
+        geometry = TrackGeometry.from_track(track)
+        self.session_tracks[track["id"]] = track
+        self.track = track
+        self.world.set_track(geometry)
+        self._robot_to_start()
+        return [self._config_message(t_ms)]
+
+    def _apply_profile(self, t_ms: int) -> None:
+        """Recalcula el perfil efectivo y los parámetros de mundo y robot, sin mover el robot."""
+        self.effective = effective_profile(self.profile)
+        self.world.set_params(WorldParams.from_effective(self.effective))
+        self.robot.set_params(_robot_params(self.effective))
+        self._restart_control(t_ms)
+        if len(self.last_sensors) != int(self.effective["line_sensors"]):
+            self.last_sensors = [int(self.effective["adc_white"])] * int(self.effective["line_sensors"])
 
     # --- Corrida --------------------------------------------------------------------------
 

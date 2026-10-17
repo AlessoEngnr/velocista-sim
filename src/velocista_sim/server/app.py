@@ -37,12 +37,10 @@ def create_app(settings: Settings | None = None, clock: Callable[[], float] | No
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket) -> None:
         await websocket.accept()
-        robot_id = websocket.query_params.get("robot")
-        track_id = websocket.query_params.get("track")
         session = Session(
             catalog, settings,
-            robot_id=robot_id if robot_id in catalog.profiles else None,
-            track_id=track_id if track_id in catalog.tracks else None,
+            robot_id=websocket.query_params.get("robot"),
+            track_id=websocket.query_params.get("track"),
         )
         queue = OutboundQueue()
         for message in session.open():
