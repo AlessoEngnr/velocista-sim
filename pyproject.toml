@@ -25,6 +25,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
+    "playwright>=1.64.0",
     "pytest>=9.1.1",
     "websockets>=17.2",
 ]
@@ -34,4 +35,5 @@ testpaths = ["tests"]
 addopts = "-ra -m 'not slow'"
 markers = [
     "slow: prueba de tiempo real, lenta",
+    "browser: prueba de navegador con Playwright (requiere Chromium)",
 ]

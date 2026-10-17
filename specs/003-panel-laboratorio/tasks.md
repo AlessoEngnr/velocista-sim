@@ -44,10 +44,10 @@ separado.
 
 **Purpose**: dependencias de desarrollo, marcador de tests, CI y estructura de carpetas.
 
-- [ ] T001 Crear la estructura vacía del panel: `src/velocista_sim/server/static/`, `src/velocista_sim/server/static/js/` y `src/velocista_sim/server/static/js/views/` (con un `index.html` mínimo provisional que diga "Panel de laboratorio" para poder montar y probar la ruta)
-- [ ] T002 Agregar Playwright como dependencia solo de desarrollo con `uv add --dev playwright` (actualiza `pyproject.toml` en `[dependency-groups].dev` y `uv.lock`); no tocar `[project].dependencies`
-- [ ] T003 [P] Registrar el marcador `browser` en `pyproject.toml` (`[tool.pytest.ini_options].markers`: `"browser: prueba de navegador con Playwright (requiere Chromium)"`), manteniendo `addopts = "-ra -m 'not slow'"` sin excluir `browser`
-- [ ] T004 [P] Actualizar `.github/workflows/tests.yml`: tras `uv sync --locked`, agregar el paso `uv run playwright install --with-deps chromium` y fijar `env: VELOCISTA_REQUIRE_BROWSER: "1"` en el paso `uv run pytest`
+- [X] T001 Crear la estructura vacía del panel: `src/velocista_sim/server/static/`, `src/velocista_sim/server/static/js/` y `src/velocista_sim/server/static/js/views/` (con un `index.html` mínimo provisional que diga "Panel de laboratorio" para poder montar y probar la ruta)
+- [X] T002 Agregar Playwright como dependencia solo de desarrollo con `uv add --dev playwright` (actualiza `pyproject.toml` en `[dependency-groups].dev` y `uv.lock`); no tocar `[project].dependencies`
+- [X] T003 [P] Registrar el marcador `browser` en `pyproject.toml` (`[tool.pytest.ini_options].markers`: `"browser: prueba de navegador con Playwright (requiere Chromium)"`), manteniendo `addopts = "-ra -m 'not slow'"` sin excluir `browser`
+- [X] T004 [P] Actualizar `.github/workflows/tests.yml`: tras `uv sync --locked`, agregar el paso `uv run playwright install --with-deps chromium` y fijar `env: VELOCISTA_REQUIRE_BROWSER: "1"` en el paso `uv run pytest`
 
 ---
 

@@ -13,4 +13,7 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked
+      - run: uv run playwright install --with-deps chromium
       - run: uv run pytest
+        env:
+          VELOCISTA_REQUIRE_BROWSER: "1"
