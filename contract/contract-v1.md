@@ -205,7 +205,7 @@ Todos los eventos llevan `event` (`run_started`, `lap`, `off_track` o `run_finis
 | `off_track` | `reason` (en v1: `"line_lost"`) | Al salir de la pista |
 | `run_finished` | `summary` (ver abajo) | Al terminar la corrida |
 
-Campos de `summary` (todos obligatorios):
+Campos de `summary` (todos obligatorios, FR-023):
 
 | Campo | Tipo | Valor |
 |---|---|---|
