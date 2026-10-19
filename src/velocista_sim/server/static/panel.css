@@ -313,6 +313,23 @@ dd {
   flex: 1;
 }
 
+/* Columna derecha: Control nunca se achica (sus pestañas siempre visibles); Vueltas crece con su
+   historial hasta el 45 % de la columna y después desplaza por dentro; Corridas toma el resto,
+   con un mínimo, y si falta lugar es Vueltas la que cede (su lista sigue desplazando). */
+.card-control {
+  flex: none;
+}
+
+.card-laps {
+  flex: 0 1 auto;
+  max-height: 45%;
+  overflow: hidden;
+}
+
+.card-runs {
+  min-height: 96px;
+}
+
 .card-head {
   display: flex;
   align-items: baseline;
@@ -640,6 +657,15 @@ dd {
     min-height: 280px;
   }
 
+  /* Apilado, la columna no tiene alto fijo: el historial se limita por sí mismo. */
+  .card-laps {
+    max-height: none;
+  }
+
+  .card-laps .lap-history {
+    max-height: 240px;
+  }
+
   .robot-selector {
     margin-left: 0;
   }
@@ -671,6 +697,22 @@ dd {
 
 .lap-history .value-best {
   color: var(--best);
+}
+
+.lap-history .lap-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+}
+
+/* Marca de ajuste: texto y símbolo, no solo color (SC-011). */
+.lap-history .lap-change {
+  color: var(--warn);
+  font-family: var(--font-mono);
+  font-size: var(--size-label);
+  font-variant-numeric: tabular-nums;
 }
 
 .summary-title {

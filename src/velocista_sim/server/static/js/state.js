@@ -80,7 +80,9 @@ export function applyMessage(state, message) {
     // Un `load` aceptado limpia el rastro y reinicia la calibración; un `load_track` aceptado
     // limpia el rastro aunque el `track_id` no cambie (research R5, FR-018); un `set_profile`
     // aceptado marca como medidos (o por defecto, con `null`) solo los parámetros enviados.
+    // Durante una corrida, recuerda el ajuste para marcar la próxima vuelta (`trackConfigChange`).
     case "config": {
+      trackConfigChange(state, state.config, message);
       state.config = message;
       syncDrafts(state, false);
       const command = state.pending.shift();
@@ -161,7 +163,9 @@ function applyTelemetry(state, message) {
 }
 
 function startRun(state, runId) {
-  state.run = { runId, laps: [], bestLapMs: null, lastLapMs: null, avgLapMs: null, offTracks: [] };
+  state.run = {
+    runId, laps: [], bestLapMs: null, lastLapMs: null, avgLapMs: null, offTracks: [], configChange: null,
+  };
   state.lastRun = null;
 }
 
@@ -178,7 +182,7 @@ function applyEvent(state, message) {
     case "lap": {
       if (state.run?.runId !== message.run_id) startRun(state, message.run_id);
       const run = state.run;
-      run.laps.unshift({ n: message.lap, lapMs: message.lap_ms });
+      run.laps.unshift({ n: message.lap, lapMs: message.lap_ms, configChange: takeConfigChange(run) });
       if (run.laps.length > LAPS_LIMIT) run.laps.length = LAPS_LIMIT;
       run.lastLapMs = message.lap_ms;
       run.bestLapMs = Math.min(...run.laps.map((lap) => lap.lapMs));
@@ -209,6 +213,41 @@ function applyEvent(state, message) {
     default:
       addLog(state, { kind: "warning", tMs: message.t_ms, text: `Evento ignorado: ${String(message.event)}` });
   }
+}
+
+// Campos del `config` que cambian el comportamiento del robot. `rate_hz` no: solo cambia cuántas
+// telemetrías llegan, no los tiempos de vuelta.
+const BEHAVIOR_FIELDS = ["kp", "ki", "kd", "base_speed"];
+
+function behaviorValues(config) {
+  return Object.fromEntries(BEHAVIOR_FIELDS.map((field) => [field, confirmedValue(config, field)]));
+}
+
+/**
+ * Con una corrida activa, un `config` que llega guarda los valores de antes (del primer `config`
+ * desde la última vuelta) y los nuevos. La próxima vuelta completada se marca con lo que cambió,
+ * para comparar tiempos antes y después del ajuste. No pasa por el registro: `set_config` no se
+ * anota ahí.
+ */
+function trackConfigChange(state, previous, next) {
+  const run = state.run;
+  if (!run || !previous) return;
+  if (!run.configChange) run.configChange = { from: behaviorValues(previous), to: null };
+  run.configChange.to = behaviorValues(next);
+}
+
+/**
+ * Devuelve los cambios pendientes para la vuelta que se acaba de completar (`[{field, from, to}]`,
+ * o `null` si no hubo o se deshicieron) y empieza de nuevo para la siguiente.
+ */
+function takeConfigChange(run) {
+  const change = run.configChange;
+  run.configChange = null;
+  if (!change) return null;
+  const changes = BEHAVIOR_FIELDS
+    .filter((field) => change.from[field] !== change.to[field])
+    .map((field) => ({ field, from: change.from[field], to: change.to[field] }));
+  return changes.length > 0 ? changes : null;
 }
 
 /** Vueltas completadas en la corrida activa, según `event lap` y `telemetry.lap.n`. */

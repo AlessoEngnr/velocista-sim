@@ -600,6 +600,97 @@ def test_rejected_set_profile_changes_no_mark(page: Page, capture: Capture, live
     assert capture.console_errors == []
 
 
+# Cada pestaña es lo que se ve en su centro (nada la tapa), VUELTAS queda bajo Control y dentro
+# de la columna, su lista desplaza por dentro y Corridas sigue visible.
+RIGHT_COLUMN_LAYOUT = """() => {
+  const rect = (selector) => document.querySelector(selector).getBoundingClientRect();
+  const tabs = ["tab-tuning", "tab-robot-track", "tab-calibration"].map((id) => {
+    const tab = document.querySelector(`[data-testid="${id}"]`);
+    const box = tab.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    return tab.contains(hit);
+  });
+  const history = document.querySelector('[data-testid="lap-history"]');
+  const control = rect(".card-control");
+  const laps = rect(".card-laps");
+  const runs = rect(".card-runs");
+  const column = rect(".column-right");
+  return {
+    tabs,
+    lapsBelowControl: laps.top >= control.bottom - 0.5,
+    lapsInsideColumn: laps.bottom <= column.bottom + 0.5,
+    historyScrolls: history.scrollHeight > history.clientHeight,
+    runsHeight: runs.height,
+    items: history.children.length,
+  };
+}"""
+
+
+def test_long_lap_history_never_covers_the_tabs(page: Page, capture: Capture, live_url: str) -> None:
+    """Con más de 100 vueltas, la lista desplaza dentro de VUELTAS y las pestañas siguen visibles."""
+    server = FakeServer(page, open_session(SIM_HELLO, SIM_CONFIG))
+    page.goto(live_url)
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    connection = server.last
+    connection.send(event("run_started", "r-1", 2000), telemetry(SIM_HELLO, 1, run_id="r-1"))
+    for n in range(1, 121):
+        connection.send(event("lap", "r-1", 2000 + n * 3000, lap=n, lap_ms=3000 + n))
+    expect(_by_id(page, "lap-n")).to_have_text("120")
+
+    for tab in ("tuning", "robot-track", "calibration"):
+        _by_id(page, f"tab-{tab}").click()
+        page.wait_for_timeout(100)
+        layout = page.evaluate(RIGHT_COLUMN_LAYOUT)
+        assert layout["items"] == 100, layout
+        assert layout["tabs"] == [True, True, True], (tab, layout)
+        assert layout["lapsBelowControl"] and layout["lapsInsideColumn"], (tab, layout)
+        assert layout["historyScrolls"], (tab, layout)
+        assert layout["runsHeight"] >= 60, (tab, layout)
+    assert capture.console_errors == []
+
+
+def _lap_items(page: Page):
+    return _by_id(page, "lap-history").locator("li")
+
+
+def test_lap_after_a_config_change_is_marked(page: Page, capture: Capture, live_url: str) -> None:
+    """La primera vuelta completada después de un `config` que cambia valores lleva «⚙ campo
+    antes→después»; `set_config` sigue sin anotarse en el registro."""
+    server = FakeServer(page, open_session(SIM_HELLO, SIM_CONFIG))
+    page.goto(live_url)
+    expect(_by_id(page, "kp-input")).to_have_value("0.0450")
+    connection = server.last
+    connection.send(event("run_started", "r-1", 2000), telemetry(SIM_HELLO, 1, run_id="r-1"))
+    connection.send(event("lap", "r-1", 5000, lap=1, lap_ms=3000))
+
+    # Un ajuste confirmado durante la corrida: kp y base_speed (dos `config` antes de la vuelta).
+    _commit(page, "kp-input", "0.08")
+    _wait_for(lambda: len(server.commands("set_config")) == 1, page)
+    connection.send({**SIM_CONFIG, "t_ms": 5500, "params": {"kp": 0.08, "ki": 0, "kd": 0.9}})
+    _commit(page, "base-speed-input", "200")
+    _wait_for(lambda: len(server.commands("set_config")) == 2, page)
+    connection.send({**SIM_CONFIG, "t_ms": 5600, "params": {"kp": 0.08, "ki": 0, "kd": 0.9}, "base_speed": 200})
+    # Solo frecuencia: no cambia el comportamiento del robot y no se marca.
+    connection.send({**SIM_CONFIG, "t_ms": 5700, "params": {"kp": 0.08, "ki": 0, "kd": 0.9}, "base_speed": 200, "rate_hz": 100})
+    connection.send(event("lap", "r-1", 8000, lap=2, lap_ms=2900))
+    connection.send(event("lap", "r-1", 11000, lap=3, lap_ms=2850))
+
+    expect(_lap_items(page)).to_have_count(3)
+    expect(_lap_items(page).nth(1)).to_contain_text("⚙ kp 0.0450→0.0800 · base 180→200")
+    expect(_lap_items(page).nth(0)).not_to_contain_text("⚙")
+    expect(_lap_items(page).nth(2)).not_to_contain_text("⚙")
+
+    # Un cambio que se deshace antes de completar la vuelta no deja marca.
+    connection.send({**SIM_CONFIG, "t_ms": 11500, "params": {"kp": 0.05, "ki": 0, "kd": 0.9}, "base_speed": 200, "rate_hz": 100})
+    connection.send({**SIM_CONFIG, "t_ms": 11600, "params": {"kp": 0.08, "ki": 0, "kd": 0.9}, "base_speed": 200, "rate_hz": 100})
+    connection.send(event("lap", "r-1", 14000, lap=4, lap_ms=2800))
+    expect(_lap_items(page)).to_have_count(4)
+    expect(_lap_items(page).nth(0)).not_to_contain_text("⚙")
+
+    expect(_by_id(page, "log").locator('li[data-kind="local"]')).to_have_count(0)
+    assert capture.console_errors == []
+
+
 def test_unknown_track_on_connect_is_shown(page: Page, capture: Capture, live_url: str) -> None:
     """Como el simulador ante `?track=no-existe`: abre igual y avisa con un `error` sin `cmd`."""
     unknown = {"type": "error", "v": 1, "t_ms": 1, "code": "unknown_track",

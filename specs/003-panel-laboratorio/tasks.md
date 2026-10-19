@@ -245,11 +245,18 @@ cambia; borrar → `POR DEFECTO` (quickstart pasos 14–16).
 - [X] T050 [P] Agregar la sección "Panel de laboratorio" a `README.md`: abrir `http://localhost:8000/` con `uv run velocista-sim`, qué muestra cada columna, cómo instalar Chromium para los tests (`uv run playwright install chromium`), `uv run pytest -m browser`, la prueba de carga `uv run pytest -m slow tests/browser/test_panel_load.py` (no corre en CI) y la verificación manual de 5 min a 100 Hz antes de cada PR (quickstart paso 20), y que el panel es el ejemplo de cliente v1 para el front (`connection.js`, `commands.js`, `state.js`, SC-007)
 - [X] T051 Revisar que cada módulo JS de `src/velocista_sim/server/static/js/` tenga un comentario de cabecera en español con su responsabilidad y que `state.js` documente, junto a cada `case` de `applyMessage`, qué efecto tiene el mensaje (SC-007)
 - [X] T052 Ejecutar `uv run pytest` completo (incluye `tests/browser/` con Chromium instalado) y corregir fallos; confirmar que los tests existentes de `/health` y `/ws` pasan sin modificaciones en sus asserts
-- [ ] T053 Recorrer a mano la tabla de la sección 2 de `specs/003-panel-laboratorio/quickstart.md` (pasos 1–20, incluida la corrida de 5 min a 100 Hz antes de abrir el PR) con `uv run velocista-sim` en una ventana de 1440 × 900, y correr `uv run pytest -m slow tests/browser/test_panel_load.py` y anotar cualquier desvío como tarea nueva en este archivo
+- [X] T053 Recorrer a mano la tabla de la sección 2 de `specs/003-panel-laboratorio/quickstart.md` (pasos 1–20, incluida la corrida de 5 min a 100 Hz antes de abrir el PR) con `uv run velocista-sim` en una ventana de 1440 × 900, y correr `uv run pytest -m slow tests/browser/test_panel_load.py` y anotar cualquier desvío como tarea nueva en este archivo
 
 **Estado de T053**: `uv run pytest -m slow tests/browser/test_panel_load.py` pasa (30 s a
-100 Hz, `seq-lost` = 0, `kp` confirmado en < 1 s). Falta el recorrido manual de quickstart
-(pasos 1–20, con la corrida de 5 min a 100 Hz), que hace el usuario antes de abrir el PR.
+100 Hz, `seq-lost` = 0, `kp` confirmado en < 1 s). Recorrido manual hecho por el usuario: más de
+8 min a 100 Hz, PERDIDAS 0 y consola sin errores salvo el 404 del favicon (T056). Surgieron
+T054–T056.
+
+### Ajustes tras la prueba manual (T053)
+
+- [X] T054 [US1] Bug: con más de 100 vueltas a 1440 × 900, la tarjeta Vueltas tapaba las pestañas de la tarjeta Control (todas las `.card` tienen `min-height: 0` y Control se achicaba por debajo de su contenido). En `panel.css`: `.card-control` no se achica, `.card-laps` crece hasta el 45 % de la columna y su lista desplaza por dentro, `.card-runs` conserva un mínimo; apilado (< 1100 px) el historial se limita a 240 px. Test `test_long_lap_history_never_covers_the_tabs` con 120 vueltas y cada pestaña
+- [X] T055 [US2] Marca de ajuste en Vueltas: la primera vuelta completada después de un `config` que cambia `kp`, `ki`, `kd` o `base_speed` durante la corrida muestra «⚙ kp 0.0450→0.0800 · base 180→200» (valores del primer `config` desde la vuelta anterior contra los últimos; si el cambio se deshace no hay marca; `rate_hz` no se marca porque no cambia el comportamiento del robot). `set_config` sigue sin anotarse en el registro. Test `test_lap_after_a_config_change_is_marked`
+- [X] T056 Favicon: `static/favicon.svg` (punto magenta de la marca) declarado en `index.html`, para que la consola no muestre el 404 de `/favicon.ico`; MIME `image/svg+xml` forzado como en research R2. Test `test_page_declares_a_favicon_that_exists`
 
 **Agregado y decidido al implementar (Fase 7)**:
 

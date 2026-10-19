@@ -9,6 +9,7 @@ para entregar archivos estáticos. No transporta datos de la simulación.
 |---|---|---|---|
 | `GET` | `/` | `200`, `text/html; charset=utf-8`, contenido de `static/index.html` | `StaticFiles(html=True)` |
 | `GET` | `/panel.css` | `200`, `text/css` | |
+| `GET` | `/favicon.svg` | `200`, `image/svg+xml` | ícono declarado en `index.html` (sin pedido a `/favicon.ico`) |
 | `GET` | `/js/<módulo>.js`, `/js/views/<vista>.js` | `200`, `text/javascript` | MIME forzado (research R2) |
 | `GET` | ruta inexistente bajo `/` | `404` | comportamiento de `StaticFiles` |
 | `GET` | `/health` | sin cambios (`specs/002-simulador/contracts/http-health.md`) | registrada **antes** del montaje |

@@ -108,3 +108,15 @@ def test_static_files_are_always_revalidated(client: TestClient, path: str) -> N
 
 def test_health_is_not_affected_by_the_panel_cache_policy(client: TestClient) -> None:
     assert "cache-control" not in client.get("/health").headers
+
+
+def test_page_declares_a_favicon_that_exists(client: TestClient) -> None:
+    """El panel declara su ícono, así el navegador no pide `/favicon.ico` y la consola no
+    muestra un 404."""
+    html = client.get("/").text
+    match = re.search(r'<link rel="icon" href="([^"]+)" type="image/svg\+xml">', html)
+    assert match, "index.html no declara el favicon"
+    icon = client.get("/" + match.group(1))
+    assert icon.status_code == 200
+    assert icon.headers["content-type"].startswith("image/svg+xml")
+    assert icon.headers["cache-control"] == "no-cache"

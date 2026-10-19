@@ -36,6 +36,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 # rechaza módulos ES con ese tipo (research R2).
 mimetypes.add_type("text/javascript", ".js")
 mimetypes.add_type("text/css", ".css")
+mimetypes.add_type("image/svg+xml", ".svg")
 
 
 class PanelFiles(StaticFiles):
