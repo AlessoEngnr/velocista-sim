@@ -1,17 +1,23 @@
-"""Aplicación FastAPI: WebSocket `/ws` con una sesión independiente por conexión (FR-001, FR-026)
-y `GET /health` para el healthcheck de Railway (FR-042, contracts/http-health.md)."""
+"""Aplicación FastAPI: WebSocket `/ws` con una sesión independiente por conexión (FR-001, FR-026),
+`GET /health` para el healthcheck de Railway (FR-042, contracts/http-health.md) y el panel de
+laboratorio estático en `/` (specs/003-panel-laboratorio, contracts/http-panel.md)."""
 
 from __future__ import annotations
 
 import json
 import logging
+import mimetypes
 import os
 import time
+from pathlib import Path
 from typing import Awaitable, Callable
 
 import anyio
 from fastapi import FastAPI, WebSocket
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.responses import Response
+from starlette.types import Scope
 from starlette.websockets import WebSocketDisconnect
 
 from .catalog import load_catalog
@@ -23,6 +29,25 @@ log = logging.getLogger(__name__)
 
 CLOSE_POLICY_VIOLATION = 1008
 CLOSE_TRY_AGAIN_LATER = 1013
+
+STATIC_DIR = Path(__file__).parent / "static"
+
+# En Windows `mimetypes` lee el registro y `.js` puede quedar como `text/plain`; el navegador
+# rechaza módulos ES con ese tipo (research R2).
+mimetypes.add_type("text/javascript", ".js")
+mimetypes.add_type("text/css", ".css")
+mimetypes.add_type("image/svg+xml", ".svg")
+
+
+class PanelFiles(StaticFiles):
+    """Archivos del panel con `Cache-Control: no-cache`: el navegador puede guardarlos, pero los
+    revalida (ETag → 304) antes de cada uso. Así, tras un despliegue nunca mezcla módulos ES de
+    versiones distintas (contracts/http-panel.md)."""
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 def create_app(settings: Settings | None = None, clock: Callable[[], float] | None = None) -> FastAPI:
@@ -71,6 +96,8 @@ def create_app(settings: Settings | None = None, clock: Callable[[], float] | No
         finally:
             app.state.sessions -= 1
 
+    # Al final: `/health` y `/ws` se resuelven antes que el montaje del panel (research R1).
+    app.mount("/", PanelFiles(directory=STATIC_DIR, html=True), name="panel")
     return app
 
 

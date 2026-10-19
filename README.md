@@ -86,3 +86,52 @@ Con Docker: `docker build -t velocista-sim .` y
 `docker run --rm -e PORT=9000 -p 9000:9000 velocista-sim`. El despliegue en Railway usa el mismo
 [`Dockerfile`](Dockerfile) y [`railway.json`](railway.json) (healthcheck `/health`). Guía de
 validación completa en [`specs/002-simulador/quickstart.md`](specs/002-simulador/quickstart.md).
+
+## Panel de laboratorio
+
+El mismo servicio sirve en `/` un panel web para ver y ajustar la simulación. Es un cliente más del
+contrato v1: se conecta a `/ws` del mismo origen (`ws` en local, `wss` en Railway) y no usa otra
+API.
+
+```powershell
+uv run velocista-sim   # abrir http://localhost:8000/ en el navegador
+```
+
+En Railway: `https://velocista-sim-production.up.railway.app/`.
+
+| Columna | Qué muestra |
+|---|---|
+| Izquierda | **Regleta** (lectura de cada sensor, posición de la línea, error, línea perdida), **Controlador** (términos P, I, D y salida), **Motores** (PWM con signo) y **Registro** de eventos y errores |
+| Centro | **Rastro** del robot simulado a partir de `sim_truth`, con velocidad, distancia y pose (no hay mapa de la pista: su geometría no viaja por el contrato) |
+| Derecha | **Control**: Iniciar, Detener, Reiniciar y vueltas objetivo; pestañas **Ajuste** (`kp`, `ki`, `kd`, `base_speed`, frecuencia), **Robot y pista** (catálogo y pista desde archivo) y **Calibración** (valores medidos del perfil); **Vueltas** y **Corridas** (resumen de cada corrida) |
+
+La barra superior muestra conexión, corrida, vueltas, batería, frecuencia, pista, `seq` y
+telemetrías perdidas. Con un robot real (`source = "robot"`) se ocultan los controles solo-sim y
+el rastro.
+
+### Ejemplo de cliente v1 para el front
+
+El panel es JavaScript sin frameworks ni build (módulos ES en
+[`src/velocista_sim/server/static/js/`](src/velocista_sim/server/static/js/)). Los módulos que
+sirven de referencia para otro cliente:
+
+- `connection.js`: arma la URL de `/ws` y abre el WebSocket.
+- `commands.js`: la única vía para construir comandos; cada función devuelve un comando válido.
+- `state.js`: `applyMessage` interpreta cada mensaje del contrato (un `case` por `type`, con
+  comentarios) y correlaciona las respuestas con la cola de comandos pendientes.
+
+### Tests del panel
+
+Los tests de navegador usan Playwright con Chromium:
+
+```powershell
+uv run playwright install chromium               # una vez
+uv run pytest -m browser                         # solo los del panel (también corren con uv run pytest)
+uv run pytest -m slow tests/browser/test_panel_load.py   # carga: 30 s a 100 Hz (no corre en CI)
+```
+
+Antes de cada PR del panel, verificación manual: frecuencia 100 Hz y una corrida de 5 minutos
+(paso 20 de [`specs/003-panel-laboratorio/quickstart.md`](specs/003-panel-laboratorio/quickstart.md),
+donde está la guía completa).
+
+Pendientes fuera de las specs en curso: [`docs/backlog.md`](docs/backlog.md).

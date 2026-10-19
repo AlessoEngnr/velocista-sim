@@ -1,0 +1,827 @@
+/* Panel de laboratorio: instrumentación oscura (research R11, docs/design/reference.png).
+   Sin degradados, sombras marcadas, brillos, transiciones ni animaciones (FR-043). */
+
+:root {
+  color-scheme: dark;
+
+  /* Paleta (contraste calculado sobre --card, research R11) */
+  --bg: #0b0b0e;
+  --card: #15151a;
+  --raised: #1d1d24;
+  --border: #26262e;
+  --text: #f2f2f4;
+  --muted: #8e8e99;
+  --accent: #e5336d;        /* marca, rastro, elemento activo; nunca texto chico */
+  --accent-text: #f0517f;   /* texto en acento */
+  --best: #8cc4f2;
+  --warn: #f2b33d;
+  --danger: #ff6b5e;
+  --ok: #4fd18b;
+  --primary: #c81e57;       /* fondo del botón primario, texto blanco */
+  --primary-text: #ffffff;
+
+  /* Tipografía: solo fuentes del sistema */
+  --font-sans: system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Jerarquía (FR-039): primario > valor > secundario; los rótulos van aparte */
+  --size-primary: 1.375rem;
+  --size-value: 0.9375rem;
+  --size-secondary: 0.75rem;
+  --size-label: 0.6875rem;
+
+  --gap: 12px;
+  --radius: 14px;
+  --radius-small: 8px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+/* --- Rótulos y valores ---------------------------------------------------------------- */
+
+dt,
+.label,
+.card-title,
+.field label {
+  color: var(--muted);
+  font-size: var(--size-label);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+dl,
+dd {
+  margin: 0;
+}
+
+.card-title {
+  margin: 0 0 8px;
+}
+
+.value {
+  display: inline-block;
+  min-width: 8ch;
+  font-family: var(--font-mono);
+  font-size: var(--size-value);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.value-primary {
+  font-size: var(--size-primary);
+  min-width: 11ch;
+}
+
+.value-id {
+  min-width: 10ch;
+  text-align: left;
+}
+
+.value-count {
+  min-width: 3ch;
+}
+
+.value-target {
+  min-width: 0;
+  text-align: left;
+}
+
+.value-time {
+  min-width: 9ch;
+}
+
+.value-volts {
+  min-width: 7ch;
+}
+
+.value-hz {
+  min-width: 6ch;
+}
+
+.value-seq {
+  min-width: 7ch;
+}
+
+.value-best {
+  color: var(--best);
+}
+
+/* --- Estados: color más texto o símbolo (FR-042) -------------------------------------- */
+
+.status {
+  font-family: var(--font-mono);
+  font-size: var(--size-value);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.status[data-state="connecting"] {
+  color: var(--warn);
+}
+
+.status[data-state="open"],
+.status[data-state="running"] {
+  color: var(--ok);
+}
+
+.status[data-state="closed"] {
+  color: var(--danger);
+}
+
+.status[data-state="idle"] {
+  color: var(--muted);
+}
+
+.line-lost {
+  min-height: 1.35em;
+  margin: 6px 0 0;
+  color: var(--warn);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+/* --- Barra superior ------------------------------------------------------------------- */
+
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.brand-mark {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.connection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.conn-message {
+  color: var(--danger);
+  font-size: var(--size-secondary);
+}
+
+.metrics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 18px;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+}
+
+.metric dd {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.metric-primary .status,
+.metric-primary .value-count,
+.metric-primary .value-target {
+  font-size: var(--size-primary);
+}
+
+.robot-selector {
+  margin-left: auto;
+  position: relative;
+}
+
+.robot-selector summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--raised);
+}
+
+.tag {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--size-secondary);
+  text-transform: uppercase;
+}
+
+.session-data {
+  position: absolute;
+  right: 0;
+  z-index: 10;
+  min-width: 320px;
+  margin-top: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--raised);
+  color: var(--muted);
+  font-size: var(--size-secondary);
+}
+
+.session-data div {
+  display: grid;
+  grid-template-columns: 11ch 1fr;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.session-data dd {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+/* --- Grilla de tres columnas (FR-038, FR-044) ----------------------------------------- */
+
+.columns {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(0, 2fr) minmax(320px, 1.2fr);
+  gap: var(--gap);
+  padding: var(--gap);
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  min-width: 0;
+  min-height: 0;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.card-fill {
+  flex: 1;
+}
+
+/* Columna derecha: Control nunca se achica (sus pestañas siempre visibles); Vueltas crece con su
+   historial hasta el 45 % de la columna y después desplaza por dentro; Corridas toma el resto,
+   con un mínimo, y si falta lugar es Vueltas la que cede (su lista sigue desplazando). */
+.card-control {
+  flex: none;
+}
+
+.card-laps {
+  flex: 0 1 auto;
+  max-height: 45%;
+  overflow: hidden;
+}
+
+.card-runs {
+  min-height: 96px;
+}
+
+.card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.notice {
+  color: var(--muted);
+}
+
+/* Listas que desplazan por dentro de su tarjeta */
+.list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  font-size: var(--size-secondary);
+}
+
+.list li {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+/* --- Lecturas -------------------------------------------------------------------------- */
+
+.readouts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.readouts div {
+  display: flex;
+  flex-direction: column;
+}
+
+.readouts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10ch, 1fr));
+}
+
+.readouts-strip {
+  margin-top: 8px;
+  justify-content: space-between;
+}
+
+.canvas-box {
+  position: relative;
+  min-height: 0;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--bg);
+}
+
+.canvas-box canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.canvas-sensors {
+  height: 110px;
+}
+
+.canvas-trail {
+  flex: 1;
+  min-height: 200px;
+}
+
+/* --- Controles ------------------------------------------------------------------------- */
+
+.btn {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--raised);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+
+.btn:focus-visible,
+.tab:focus-visible,
+.input:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 1px;
+}
+
+.btn:disabled,
+.input:disabled,
+.tab:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-text);
+}
+
+.btn-small {
+  padding: 2px 8px;
+  font-size: var(--size-secondary);
+}
+
+.run-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.field-inline {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.input {
+  width: 12ch;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--raised);
+  color: var(--text);
+}
+
+.input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+/* Control segmentado para las pestañas */
+.tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 10px;
+  padding: 2px;
+  border-radius: var(--radius-small);
+  background: var(--raised);
+}
+
+.tab {
+  flex: 1;
+  padding: 5px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--size-label);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.tab[aria-selected="true"] {
+  border-color: var(--accent);
+  background: var(--card);
+  color: var(--text);
+}
+
+.tab-panel {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Pestaña Robot y pista */
+.select {
+  width: 100%;
+  font-family: var(--font-mono);
+}
+
+.file {
+  width: 100%;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--size-secondary);
+}
+
+.file:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.file:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 1px;
+}
+
+.robot-track-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.hint {
+  margin: 0;
+  color: var(--warn);
+  font-size: var(--size-secondary);
+}
+
+.hint::before {
+  content: "⚠ ";
+}
+
+/* Pestaña Ajuste: rótulo | slider | campo numérico | unidad */
+.tuning-row {
+  display: grid;
+  grid-template-columns: 9ch minmax(0, 1fr) 9ch 2.75rem;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.tuning-row label,
+.tuning-row .unit {
+  color: var(--muted);
+  font-size: var(--size-label);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.tuning-row .input {
+  width: 100%;
+  min-width: 9ch;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.range {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.range:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.range:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+
+/* --- Registro (FR-042: error con color y símbolo) -------------------------------------- */
+
+.log li {
+  display: flex;
+  gap: 8px;
+}
+
+.log .log-time {
+  flex: none;
+  min-width: 9ch;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.log li[data-kind="error"] .log-text {
+  color: var(--danger);
+}
+
+.log li[data-kind="warning"] .log-text {
+  color: var(--warn);
+}
+
+.log li[data-kind="local"] .log-text {
+  color: var(--muted);
+}
+
+/* --- Una columna por debajo de ~1100 px: Control → izquierda → centro ------------------- */
+
+@media (max-width: 1100px) {
+  body {
+    height: auto;
+    min-height: 100vh;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .column-right {
+    order: 1;
+  }
+
+  .column-left {
+    order: 2;
+  }
+
+  .column-center {
+    order: 3;
+  }
+
+  .card-fill {
+    min-height: 280px;
+  }
+
+  /* Apilado, la columna no tiene alto fijo: el historial se limita por sí mismo. */
+  .card-laps {
+    max-height: none;
+  }
+
+  .card-laps .lap-history {
+    max-height: 240px;
+  }
+
+  .robot-selector {
+    margin-left: 0;
+  }
+
+  .session-data {
+    left: 0;
+    right: auto;
+    min-width: 0;
+    max-width: calc(100vw - 32px);
+  }
+}
+
+/* --- Vueltas y corridas ---------------------------------------------------------------- */
+
+.lap-history {
+  margin-top: 8px;
+}
+
+.lap-history li {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+}
+
+.lap-history .value {
+  color: var(--text);
+  font-size: var(--size-secondary);
+}
+
+.lap-history .value-best {
+  color: var(--best);
+}
+
+.lap-history .lap-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+}
+
+/* Marca de ajuste: texto y símbolo, no solo color (SC-011). */
+.lap-history .lap-change {
+  color: var(--warn);
+  font-family: var(--font-mono);
+  font-size: var(--size-label);
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-title {
+  margin: 0 0 4px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.summary-values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 20px;
+}
+
+.summary-values div {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.summary-values .value {
+  min-width: 0;
+  font-size: var(--size-secondary);
+}
+
+/* --- Pestaña Calibración: 12 parámetros con desplazamiento interno ---------------------- */
+/* Cada fila: primera línea con el rótulo (se parte si hace falta, nunca se recorta) y el estado a
+   su derecha; segunda línea con la ayuda (unidad y rango), el campo y Borrar.
+   Aplicar queda fijo bajo la lista (sticky), visible sin desplazar. */
+
+#panel-calibration {
+  max-height: 340px;
+  padding-right: 4px;
+}
+
+.calib-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 10ch auto;
+  grid-template-areas:
+    "head head head"
+    "help input clear";
+  align-items: center;
+  gap: 3px 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.calib-head {
+  grid-area: head;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.calib-label {
+  min-width: 0;
+  color: var(--text);
+  font-size: var(--size-secondary);
+  overflow-wrap: anywhere;
+}
+
+.calib-help {
+  grid-area: help;
+  min-width: 0;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--size-label);
+  overflow-wrap: anywhere;
+}
+
+.calib-input {
+  grid-area: input;
+  width: 100%;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.calib-state {
+  flex: none;
+  text-align: right;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--size-label);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.calib-state[data-state="measured"] {
+  color: var(--best);
+}
+
+.calib-row .btn-small {
+  grid-area: clear;
+  justify-self: end;
+}
+
+.calib-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 2px;
+  border-top: 1px solid var(--border);
+  background: var(--card);
+}

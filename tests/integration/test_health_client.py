@@ -3,19 +3,16 @@
 from __future__ import annotations
 
 import os
-import socket
 import subprocess
 import sys
-import threading
-import time
 from pathlib import Path
 from typing import Iterator
 
 import pytest
-import uvicorn
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from support.live_server import free_port, start_live_server
 from support.session_driver import CONFIG_DIR
 from velocista_sim.server.app import create_app
 from velocista_sim.server.settings import Settings
@@ -68,26 +65,10 @@ def test_disconnect_during_run_frees_the_session() -> None:
 # --- examples/client.py contra uvicorn real -------------------------------------------------
 
 
-def _free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
-
-
 @pytest.fixture(scope="module")
 def server_url() -> Iterator[str]:
-    port = _free_port()
-    config = uvicorn.Config(create_app(_settings()), host="127.0.0.1", port=port, log_level="warning")
-    server = uvicorn.Server(config)
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    deadline = time.monotonic() + 10
-    while not server.started:
-        assert time.monotonic() < deadline, "uvicorn no arrancó"
-        time.sleep(0.05)
-    yield f"ws://127.0.0.1:{port}/ws"
-    server.should_exit = True
-    thread.join(timeout=10)
+    with start_live_server(_settings()) as http_url:
+        yield http_url.replace("http://", "ws://", 1) + "/ws"
 
 
 def _run_client(*args: str) -> subprocess.CompletedProcess[str]:
@@ -122,6 +103,6 @@ def test_client_rejected_config_exits_2(server_url: str) -> None:
 
 
 def test_client_without_server_exits_1() -> None:
-    result = _run_client(f"ws://127.0.0.1:{_free_port()}/ws", "--timeout", "5")
+    result = _run_client(f"ws://127.0.0.1:{free_port()}/ws", "--timeout", "5")
     assert result.returncode == 1
     assert "No se pudo conectar" in result.stderr

@@ -1,0 +1,760 @@
+"""Prueba de humo del panel con Playwright (specs/003-panel-laboratorio, research R12).
+
+Contra un uvicorn real: el panel abre su sesión, muestra `hello`/`config`, controla una corrida
+(Iniciar → EN CORRIDA → Detener → resumen → Reiniciar), ajusta el controlador (`set_config`,
+`set_rate`, envío limitado al arrastrar), cambia de robot y de pista, carga pistas desde archivo
+y todo frame cumple el contrato. Con un servidor falso (`route_web_socket`): errores en el
+registro, controles que vuelven al `config` ante un rechazo, vueltas objetivo, `unknown_track` de
+la conexión, desconexión y reconexión.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Callable
+
+from playwright.sync_api import Page, expect
+
+from support.browser import Capture, assert_frames_valid
+from support.fake_server import SIM_CONFIG, SIM_HELLO, FakeServer, event, open_session, telemetry
+
+
+def _by_id(page: Page, test_id: str):
+    return page.get_by_test_id(test_id)
+
+
+def _wait_for(condition: Callable[[], bool], page: Page, timeout_ms: int = 5000) -> None:
+    """Reintenta `condition` mientras la página procesa eventos (los frames llegan por callbacks)."""
+    for _ in range(timeout_ms // 50):
+        if condition():
+            return
+        page.wait_for_timeout(50)
+    assert condition(), "la condición no se cumplió a tiempo"
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+OVAL_01 = REPO_ROOT / "config" / "tracks" / "oval-01.json"
+GAPS_OVERLAP = REPO_ROOT / "contract" / "examples" / "invalid" / "track" / "gaps-overlap.json"
+STOP_TO_CHANGE = "Detén la corrida para cambiar esto"
+
+
+def _seq(page: Page) -> int:
+    return int(_by_id(page, "seq").text_content())
+
+
+def _trail_points(page: Page) -> int:
+    return int(_by_id(page, "trail-canvas").get_attribute("data-points"))
+
+
+# --- Servidor real ---------------------------------------------------------------------------
+
+
+def test_panel_connects_and_shows_the_session(page: Page, capture: Capture, live_url: str) -> None:
+    page.goto(live_url)
+
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    expect(_by_id(page, "conn-status")).to_have_text("● CONECTADO")
+    expect(_by_id(page, "robot-id")).to_have_text("velocista-01")
+    expect(_by_id(page, "source")).to_have_text("sim")
+    expect(_by_id(page, "rate-hz")).to_have_text("50 Hz")
+    expect(_by_id(page, "track-id")).to_have_text("oval-01")
+    expect(_by_id(page, "run-status")).to_have_attribute("data-state", "idle")
+    expect(_by_id(page, "btn-reconnect")).to_be_hidden()
+    expect(_by_id(page, "btn-start")).to_be_enabled()
+
+    # Tras el primer `config` el panel pide el catálogo, y el servidor lo responde.
+    _wait_for(lambda: any(m.get("type") == "catalog" for m in capture.received()), page)
+    assert capture.sent() == [{"cmd": "list"}]
+    assert capture.sockets and capture.sockets[0].endswith("/ws")
+
+    assert_frames_valid(capture.frames)
+    assert capture.console_errors == []
+
+
+def test_run_start_stop_and_reset(page: Page, capture: Capture, live_url: str) -> None:
+    page.goto(live_url)
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    expect(_by_id(page, "robot-id")).to_have_text("velocista-01")
+    expect(_by_id(page, "run-status")).to_have_attribute("data-state", "idle")
+    expect(_by_id(page, "btn-stop")).to_be_disabled()
+
+    _by_id(page, "btn-start").click()
+    expect(_by_id(page, "run-status")).to_have_attribute("data-state", "running")
+    expect(_by_id(page, "run-status")).to_have_text("● EN CORRIDA")
+    expect(_by_id(page, "run-id")).not_to_have_text("—")
+    expect(_by_id(page, "btn-start")).to_be_disabled()
+
+    first = _seq(page)
+    _wait_for(lambda: _seq(page) > first, page)
+    _wait_for(lambda: _trail_points(page) > 0, page)
+    expect(_by_id(page, "pid-out")).not_to_have_text("—")
+    expect(_by_id(page, "pwm-left")).to_contain_text("PWM")
+
+    _by_id(page, "btn-stop").click()
+    expect(_by_id(page, "summaries").locator("li")).to_have_count(1)
+    expect(_by_id(page, "run-status")).to_have_attribute("data-state", "idle")
+
+    _by_id(page, "btn-reset").click()
+    _wait_for(lambda: {"cmd": "reset"} in capture.sent(), page)
+    expect(_by_id(page, "trail-canvas")).to_have_attribute("data-points", "0")
+
+    assert_frames_valid(capture.frames)
+    assert capture.console_errors == []
+
+
+def _set_configs(capture: Capture) -> list[dict]:
+    return [command for command in capture.sent() if command["cmd"] == "set_config"]
+
+
+def _commit(page: Page, test_id: str, text: str) -> None:
+    """Escribe en un campo numérico y lo confirma con Enter (dispara `change`)."""
+    field = _by_id(page, test_id)
+    field.fill(text)
+    field.press("Enter")
+
+
+# Arrastre del slider de `kp`: 50 eventos `input` con valores crecientes durante 1 s, entre
+# `pointerdown` y `pointerup` + `change`, como lo haría el mouse.
+DRAG_KP = """
+async (slider) => {
+  slider.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+  for (let i = 1; i <= 50; i++) {
+    slider.value = String(i * 0.0005);
+    slider.dispatchEvent(new Event("input", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  slider.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+  slider.dispatchEvent(new Event("change", { bubbles: true }));
+  return slider.value;
+}
+"""
+
+
+def test_tuning_sends_set_config_and_set_rate(page: Page, capture: Capture, live_url: str) -> None:
+    page.goto(live_url)
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    expect(_by_id(page, "kp-input")).to_have_value("0.0450")
+
+    # Campo numérico: envía el valor exacto al confirmar y muestra el `config` de respuesta.
+    _commit(page, "kp-input", "0.05")
+    _wait_for(lambda: {"cmd": "set_config", "params": {"kp": 0.05}} in capture.sent(), page)
+    expect(_by_id(page, "kp-input")).to_have_value("0.0500")
+    expect(_by_id(page, "kp-input")).to_have_attribute("aria-invalid", "false")
+
+    # Coma decimal: se envía como número JSON 0.06, no como el texto "0,06".
+    _commit(page, "kp-input", "0,06")
+    _wait_for(lambda: {"cmd": "set_config", "params": {"kp": 0.06}} in capture.sent(), page)
+    comma = _set_configs(capture)[-1]["params"]["kp"]
+    assert type(comma) is float and comma == 0.06
+    raw = [f.payload for f in capture.frames if f.direction == "sent" and '"set_config"' in f.payload][-1]
+    assert '"kp":0.06' in raw.replace(" ", ""), raw
+    expect(_by_id(page, "kp-input")).to_have_value("0.0600")
+
+    # Arrastre continuo: pocos envíos por segundo y siempre el valor final.
+    before = len(_set_configs(capture))
+    final = _by_id(page, "kp-range").evaluate(DRAG_KP)
+    assert float(final) == 0.025
+    _wait_for(lambda: _set_configs(capture)[-1] == {"cmd": "set_config", "params": {"kp": 0.025}}, page)
+    expect(_by_id(page, "kp-input")).to_have_value("0.0250")
+    page.wait_for_timeout(400)
+    dragged = _set_configs(capture)[before:]
+    assert 1 <= len(dragged) <= 7, f"{len(dragged)} set_config durante el arrastre"
+    assert dragged[-1] == {"cmd": "set_config", "params": {"kp": 0.025}}
+
+    # Valores inválidos: se marcan y no se envía nada.
+    sent = len(capture.sent())
+    _commit(page, "kp-input", "-1")
+    expect(_by_id(page, "kp-input")).to_have_attribute("aria-invalid", "true")
+    _commit(page, "rate-input", "150")
+    expect(_by_id(page, "rate-input")).to_have_attribute("aria-invalid", "true")
+    page.wait_for_timeout(200)
+    assert len(capture.sent()) == sent
+
+    # Frecuencia válida: `set_rate` y la barra superior muestra la confirmada.
+    _commit(page, "rate-input", "100")
+    _wait_for(lambda: {"cmd": "set_rate", "hz": 100} in capture.sent(), page)
+    expect(_by_id(page, "rate-hz")).to_have_text("100 Hz")
+    expect(_by_id(page, "rate-input")).to_have_value("100")
+    expect(_by_id(page, "rate-input")).to_have_attribute("aria-invalid", "false")
+
+    assert_frames_valid(capture.frames)
+    assert capture.console_errors == []
+
+
+def test_tuning_during_a_run_marks_config_changed(page: Page, capture: Capture, live_url: str) -> None:
+    page.goto(live_url)
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    expect(_by_id(page, "kp-input")).to_have_value("0.0450")
+
+    _by_id(page, "btn-start").click()
+    expect(_by_id(page, "run-status")).to_have_attribute("data-state", "running")
+    _commit(page, "kp-input", "0.04")
+    expect(_by_id(page, "kp-input")).to_have_value("0.0400")
+    _by_id(page, "btn-stop").click()
+
+    latest = _by_id(page, "summaries").locator("li").first
+    changed = latest.locator("div", has=page.locator("dt", has_text="CAMBIÓ CONFIG")).locator("dd")
+    expect(changed).to_have_text("sí")
+    assert_frames_valid(capture.frames)
+    assert capture.console_errors == []
+
+
+def _received_hellos(capture: Capture) -> list[dict]:
+    return [message for message in capture.received() if message.get("type") == "hello"]
+
+
+def _open_robot_track_tab(page: Page) -> None:
+    _by_id(page, "tab-robot-track").click()
+    expect(_by_id(page, "robot-select")).to_be_visible()
+
+
+def test_robot_and_track_selection(page: Page, capture: Capture, live_url: str, tmp_path: Path) -> None:
+    page.goto(live_url)
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    _wait_for(lambda: any(m.get("type") == "catalog" for m in capture.received()), page)
+    _open_robot_track_tab(page)
+
+    # Catálogo con el robot y la pista vigentes marcados.
+    robot_option = _by_id(page, "robot-select").locator('option[value="velocista-01"]')
+    track_option = _by_id(page, "track-select").locator('option[value="oval-01"]')
+    expect(robot_option).to_have_attribute("data-current", "true")
+    expect(robot_option).to_contain_text("vigente")
+    expect(track_option).to_have_attribute("data-current", "true")
+
+    # Con una corrida activa todo queda deshabilitado, con el aviso.
+    _by_id(page, "btn-start").click()
+    expect(_by_id(page, "run-status")).to_have_attribute("data-state", "running")
+    for test_id in ("robot-select", "track-select", "track-file", "btn-catalog-refresh"):
+        expect(_by_id(page, test_id)).to_be_disabled()
+    expect(page.locator('[data-role="robot-track-hint"]')).to_be_visible()
+    expect(page.locator('[data-role="robot-track-hint"]')).to_have_text(STOP_TO_CHANGE)
+    _wait_for(lambda: _trail_points(page) > 0, page)
+    _by_id(page, "btn-stop").click()
+    expect(_by_id(page, "run-status")).to_have_attribute("data-state", "idle")
+    expect(_by_id(page, "robot-select")).to_be_enabled()
+    expect(page.locator('[data-role="robot-track-hint"]')).to_be_hidden()
+    assert _trail_points(page) > 0
+
+    # Elegir robot: `load`, nuevo `hello` + `config` y rastro limpio.
+    _by_id(page, "robot-select").select_option("velocista-01")
+    _wait_for(lambda: {"cmd": "load", "robot_id": "velocista-01"} in capture.sent(), page)
+    _wait_for(lambda: len(_received_hellos(capture)) == 2, page)
+    expect(_by_id(page, "trail-canvas")).to_have_attribute("data-points", "0")
+    expect(_by_id(page, "robot-id")).to_have_text("velocista-01")
+    expect(_by_id(page, "kp-input")).to_be_enabled()
+
+    # Archivo de pista válido: `load_track` con su contenido.
+    _by_id(page, "track-file").set_input_files(str(OVAL_01))
+    _wait_for(lambda: any(c["cmd"] == "load_track" for c in capture.sent()), page)
+    expect(_by_id(page, "track-id")).to_have_text("oval-01")
+
+    # Archivo que no es JSON: error local y nada enviado.
+    sent = len(capture.sent())
+    not_json = tmp_path / "pista.txt"
+    not_json.write_text("esto no es una pista", encoding="utf-8")
+    _by_id(page, "track-file").set_input_files(str(not_json))
+    expect(_by_id(page, "log").locator('li[data-kind="local"]').first).to_contain_text("El archivo no es JSON válido")
+    page.wait_for_timeout(200)
+    assert len(capture.sent()) == sent
+
+    # JSON que no cumple track v1: `invalid_track` y la pista no cambia.
+    invalid = tmp_path / "gaps-overlap.json"
+    invalid.write_text(json.dumps(json.loads(GAPS_OVERLAP.read_text(encoding="utf-8"))["message"]), encoding="utf-8")
+    _by_id(page, "track-file").set_input_files(str(invalid))
+    expect(_by_id(page, "log").locator('li[data-kind="error"]').first).to_contain_text("invalid_track")
+    expect(_by_id(page, "track-id")).to_have_text("oval-01")
+
+    # Elegir pista y cancelar el aviso: no se reconecta.
+    page.once("dialog", lambda dialog: dialog.dismiss())
+    _by_id(page, "track-select").select_option("oval-01")
+    page.wait_for_timeout(300)
+    assert len(capture.sockets) == 1
+
+    # Elegir pista y aceptar: sesión nueva con `track` y `robot` en la URL.
+    page.once("dialog", lambda dialog: dialog.accept())
+    _by_id(page, "track-select").select_option("oval-01")
+    _wait_for(lambda: len(capture.sockets) == 2, page)
+    assert "track=oval-01" in capture.sockets[1] and "robot=velocista-01" in capture.sockets[1]
+    _wait_for(lambda: len(_received_hellos(capture)) == 3, page)
+    hellos = _received_hellos(capture)
+    assert hellos[2]["session_id"] != hellos[0]["session_id"]
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    expect(_by_id(page, "track-id")).to_have_text("oval-01")
+
+    # El `load_track` con la pista inválida no cumple el contrato a propósito: el panel envía el
+    # archivo tal cual y el servidor lo rechaza. Todo lo demás se valida.
+    assert_frames_valid([f for f in capture.frames if '"straight-open"' not in f.payload])
+    assert capture.console_errors == []
+
+
+def test_file_track_is_marked_and_cannot_be_reopened(page: Page, capture: Capture, live_url: str, tmp_path: Path) -> None:
+    """Una pista cargada por archivo solo existe en esta sesión: aparece como «(archivo)» y deshabilitada."""
+    track = json.loads(OVAL_01.read_text(encoding="utf-8"))
+    track["id"] = "oval-copia"
+    copy = tmp_path / "oval-copia.json"
+    copy.write_text(json.dumps(track), encoding="utf-8")
+
+    page.goto(live_url)
+    _wait_for(lambda: any(m.get("type") == "catalog" for m in capture.received()), page)
+    _open_robot_track_tab(page)
+    _by_id(page, "track-file").set_input_files(str(copy))
+    expect(_by_id(page, "track-id")).to_have_text("oval-copia")
+
+    _by_id(page, "btn-catalog-refresh").click()
+    _wait_for(lambda: sum(m.get("type") == "catalog" for m in capture.received()) == 2, page)
+    option = _by_id(page, "track-select").locator('option[value="oval-copia"]')
+    expect(option).to_contain_text("(archivo)")
+    expect(option).to_be_disabled()
+    expect(option).to_have_attribute("data-current", "true")
+    expect(_by_id(page, "track-select").locator('option[value="oval-01"]')).to_be_enabled()
+    assert_frames_valid(capture.frames)
+    assert capture.console_errors == []
+
+
+def _set_profiles(capture: Capture) -> list[dict]:
+    return [command for command in capture.sent() if command["cmd"] == "set_profile"]
+
+
+def _calibrate(page: Page, values: dict[str, str]) -> None:
+    for key, text in values.items():
+        _by_id(page, f"calib-{key}").fill(text)
+    _by_id(page, "btn-calib-apply").click()
+
+
+def test_calibration_sets_and_clears_measured_values(page: Page, capture: Capture, live_url: str) -> None:
+    page.goto(live_url)
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    _by_id(page, "tab-calibration").click()
+    expect(_by_id(page, "calib-wheelbase_m")).to_be_enabled()
+    for key in ("sensor_pitch_m", "adc_noise", "turbine_suction_n", "encoder_ticks_per_rev", "control_period_ms"):
+        expect(_by_id(page, f"calib-{key}-state")).to_have_text("POR DEFECTO")
+    expect(_by_id(page, "btn-calib-clear-wheelbase_m")).to_be_disabled()
+
+    # Valor válido: un único `set_profile` y la marca MEDIDO con el valor y la unidad.
+    _calibrate(page, {"wheelbase_m": "0.128"})
+    _wait_for(lambda: len(_set_profiles(capture)) == 1, page)
+    assert _set_profiles(capture) == [{"cmd": "set_profile", "measured": {"wheelbase_m": 0.128}}]
+    expect(_by_id(page, "calib-wheelbase_m-state")).to_have_text("MEDIDO 0.128 m")
+    expect(_by_id(page, "btn-calib-clear-wheelbase_m")).to_be_enabled()
+
+    # Fuera del rango del contrato, no es número o es decimal en un entero: se marca y no se
+    # envía nada (todo comando enviado cumple el contrato, FR-037). Uno válido junto a uno
+    # inválido tampoco se envía.
+    _calibrate(page, {"adc_noise": "-5", "motor_tau_ms": "50", "adc_white": "abc", "adc_black": "1.5", "wheelbase_m": "0"})
+    for key in ("adc_noise", "adc_white", "adc_black", "wheelbase_m"):
+        expect(_by_id(page, f"calib-{key}")).to_have_attribute("aria-invalid", "true")
+    expect(_by_id(page, "calib-motor_tau_ms")).to_have_attribute("aria-invalid", "false")
+    page.wait_for_timeout(200)
+    assert len(_set_profiles(capture)) == 1
+    expect(_by_id(page, "calib-motor_tau_ms-state")).to_have_text("POR DEFECTO")
+    expect(_by_id(page, "calib-wheelbase_m-state")).to_have_text("MEDIDO 0.128 m")
+
+    # Los `adc_*` se limitan a la escala del ADC del `hello` (12 bits → 0–4095), más estricto que
+    # el 0–65535 genérico del contrato.
+    for key in ("adc_noise", "motor_tau_ms", "adc_white", "adc_black", "wheelbase_m"):
+        _by_id(page, f"calib-{key}").fill("")
+    expect(_by_id(page, "calib-adc_white-range")).to_have_text("ADC · 0–4095 · entero")
+    _calibrate(page, {"adc_white": "4524"})
+    expect(_by_id(page, "calib-adc_white")).to_have_attribute("aria-invalid", "true")
+    page.wait_for_timeout(200)
+    assert len(_set_profiles(capture)) == 1
+
+    # Borrar: `null` para ese parámetro y vuelve a POR DEFECTO.
+    _by_id(page, "calib-adc_white").fill("")
+    _by_id(page, "btn-calib-clear-wheelbase_m").click()
+    _wait_for(lambda: _set_profiles(capture)[-1] == {"cmd": "set_profile", "measured": {"wheelbase_m": None}}, page)
+    expect(_by_id(page, "calib-wheelbase_m-state")).to_have_text("POR DEFECTO")
+
+    # Con una corrida activa, la calibración queda deshabilitada con el aviso.
+    _calibrate(page, {"adc_noise": "40"})
+    expect(_by_id(page, "calib-adc_noise-state")).to_have_text("MEDIDO 40 ADC (±)")
+    _by_id(page, "btn-start").click()
+    expect(_by_id(page, "run-status")).to_have_attribute("data-state", "running")
+    expect(_by_id(page, "btn-calib-apply")).to_be_disabled()
+    expect(_by_id(page, "calib-adc_noise")).to_be_disabled()
+    expect(_by_id(page, "btn-calib-clear-adc_noise")).to_be_disabled()
+    expect(page.locator('[data-role="calibration-hint"]')).to_have_text(STOP_TO_CHANGE)
+    _by_id(page, "btn-stop").click()
+    expect(_by_id(page, "btn-calib-apply")).to_be_enabled()
+    expect(page.locator('[data-role="calibration-hint"]')).to_be_hidden()
+
+    # Otro robot con `load`: el perfil se reinicia y todo vuelve a POR DEFECTO.
+    _open_robot_track_tab(page)
+    _by_id(page, "robot-select").select_option("velocista-01")
+    _wait_for(lambda: len(_received_hellos(capture)) == 2, page)
+    _by_id(page, "tab-calibration").click()
+    expect(_by_id(page, "calib-adc_noise-state")).to_have_text("POR DEFECTO")
+
+    assert_frames_valid(capture.frames)
+    assert capture.console_errors == []
+
+
+NO_MEDIA_OR_MOTION = """() => {
+  const motion = [];
+  for (const sheet of document.styleSheets) {
+    for (const rule of sheet.cssRules) {
+      if (rule.type === CSSRule.KEYFRAMES_RULE || /\\b(animation|transition)[a-z-]*\\s*:/.test(rule.cssText)) {
+        motion.push(rule.cssText.slice(0, 80));
+      }
+    }
+  }
+  return { media: document.querySelectorAll("img, video").length, motion };
+}"""
+
+# Aplicar visible dentro de la pestaña (arriba y al final del desplazamiento) y ningún texto de
+# las filas de Calibración se sale de su caja ni de la pestaña.
+CALIBRATION_LAYOUT = """() => {
+  const panel = document.getElementById("panel-calibration");
+  const apply = document.querySelector('[data-testid="btn-calib-apply"]');
+  const inside = () => {
+    const a = apply.getBoundingClientRect();
+    const p = panel.getBoundingClientRect();
+    return a.height > 0 && a.top >= p.top - 0.5 && a.bottom <= p.bottom + 0.5;
+  };
+  panel.scrollTop = 0;
+  const atTop = inside();
+  const scrolls = panel.scrollHeight > panel.clientHeight;
+  panel.scrollTop = panel.scrollHeight;
+  const atBottom = inside();
+  panel.scrollTop = 0;
+  const clipped = [];
+  const right = panel.getBoundingClientRect().right + 0.5;
+  for (const el of panel.querySelectorAll(".calib-label, .calib-help, .calib-state")) {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const text = range.getBoundingClientRect();
+    const box = el.getBoundingClientRect();
+    if (text.right > box.right + 0.5 || box.right > right) clipped.push(el.textContent.slice(0, 30));
+  }
+  return { atTop, atBottom, scrolls, clipped, overflowX: panel.scrollWidth - panel.clientWidth };
+}"""
+
+
+def test_layout_fits_without_media_or_motion(page: Page, live_url: str) -> None:
+    """FR-043, FR-044, SC-010: 1440 × 900 sin desplazamiento; 1000 × 900 sin desplazamiento
+    horizontal y Control antes que la Regleta; sin imágenes, video, animaciones ni transiciones."""
+    page.goto(live_url)
+    expect(_by_id(page, "kp-input")).to_have_value("0.0450")
+    for tab in ("tuning", "robot-track", "calibration"):
+        _by_id(page, f"tab-{tab}").click()
+        size = page.evaluate("() => [document.documentElement.scrollWidth, document.documentElement.scrollHeight, innerWidth, innerHeight]")
+        assert size[0] <= size[2] and size[1] <= size[3], (tab, size)
+
+    page.set_viewport_size({"width": 1000, "height": 900})
+    page.wait_for_timeout(100)
+    assert page.evaluate("() => document.documentElement.scrollWidth <= innerWidth")
+    control = page.locator(".card-control").bounding_box()
+    sensors = page.locator(".card-sensors").bounding_box()
+    assert control["y"] < sensors["y"], "Control debe ir antes que la Regleta"
+
+    result = page.evaluate(NO_MEDIA_OR_MOTION)
+    assert result == {"media": 0, "motion": []}, result
+
+
+def test_calibration_apply_stays_visible_and_texts_fit(page: Page, live_url: str) -> None:
+    """Aplicar queda fijo bajo la lista y los rótulos no se recortan en ventanas angostas."""
+    page.goto(live_url)
+    expect(_by_id(page, "kp-input")).to_have_value("0.0450")
+    _by_id(page, "tab-calibration").click()
+    for width in (1440, 1280, 1110, 1000, 700, 420, 360):
+        page.set_viewport_size({"width": width, "height": 900})
+        page.wait_for_timeout(100)
+        layout = page.evaluate(CALIBRATION_LAYOUT)
+        assert layout["scrolls"], (width, "la lista de 12 parámetros debería desplazarse")
+        assert layout["atTop"] and layout["atBottom"], (width, layout)
+        assert layout["clipped"] == [] and layout["overflowX"] <= 0, (width, layout)
+
+
+# --- Servidor falso --------------------------------------------------------------------------
+
+
+def test_rejected_tuning_returns_to_the_confirmed_config(page: Page, capture: Capture, live_url: str) -> None:
+    """Ante un `error` de `set_config`/`set_rate`, los controles vuelven al último `config` (FR-013)."""
+    server = FakeServer(page, open_session(SIM_HELLO, SIM_CONFIG))
+    page.goto(live_url)
+    expect(_by_id(page, "base-speed-input")).to_have_value("180")
+
+    _commit(page, "base-speed-input", "200")
+    _wait_for(lambda: server.commands("set_config") == [{"cmd": "set_config", "base_speed": 200}], page)
+    expect(_by_id(page, "base-speed-range")).to_have_value("200")
+    server.last.send({"type": "error", "v": 1, "t_ms": 2000, "code": "out_of_range", "cmd": "set_config",
+                      "message": "base_speed fuera de rango"})
+    expect(_by_id(page, "base-speed-input")).to_have_value("180")
+    expect(_by_id(page, "base-speed-range")).to_have_value("180")
+    expect(_by_id(page, "log").locator('li[data-kind="error"]')).to_have_count(1)
+
+    _commit(page, "rate-input", "20")
+    _wait_for(lambda: server.commands("set_rate") == [{"cmd": "set_rate", "hz": 20}], page)
+    server.last.send({"type": "error", "v": 1, "t_ms": 2500, "code": "out_of_range", "cmd": "set_rate",
+                      "message": "hz fuera de rango"})
+    expect(_by_id(page, "rate-input")).to_have_value("50")
+    expect(_by_id(page, "log").locator('li[data-kind="error"]')).to_have_count(2)
+    # Los envíos de ajuste no se anotan en el registro; solo sus errores.
+    expect(_by_id(page, "log").locator('li[data-kind="local"]')).to_have_count(0)
+    assert capture.console_errors == []
+
+
+def test_rejected_set_config_and_set_rate_appear_in_the_log(page: Page, capture: Capture, live_url: str) -> None:
+    """Los envíos de `set_config`/`set_rate` no se anotan en el registro, pero sus `error` sí."""
+    errors = [
+        {"type": "error", "v": 1, "t_ms": 2000, "code": "out_of_range", "cmd": "set_config",
+         "message": "base_speed fuera de rango"},
+        {"type": "error", "v": 1, "t_ms": 2500, "code": "out_of_range", "cmd": "set_rate",
+         "message": "hz fuera de rango"},
+    ]
+    FakeServer(page, lambda connection: connection.send(SIM_HELLO, SIM_CONFIG, *errors))
+    page.goto(live_url)
+
+    log = _by_id(page, "log")
+    expect(log.locator('li[data-kind="error"]')).to_have_count(2)
+    expect(log.locator("li").nth(0)).to_contain_text("✕ out_of_range · set_rate · hz fuera de rango")
+    expect(log.locator("li").nth(1)).to_contain_text("✕ out_of_range · set_config · base_speed fuera de rango")
+    expect(log.locator("li").nth(0)).to_contain_text("2.500 s")
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    assert capture.console_errors == []
+
+
+def _set_lap_target(page: Page, text: str) -> None:
+    field = _by_id(page, "lap-target-input")
+    field.fill(text)
+    field.press("Enter")
+
+
+def _run_laps(server: FakeServer, laps: int, extra_telemetry: int = 3) -> None:
+    """La corrida `r-1`: arranque, `laps` vueltas y varias telemetrías con el último `lap.n`."""
+    connection = server.last
+    connection.send(event("run_started", "r-1", 2000), telemetry(SIM_HELLO, 1, run_id="r-1"))
+    seq = 1
+    for n in range(1, laps + 1):
+        seq += 1
+        connection.send(event("lap", "r-1", 2000 + n * 3000, lap=n, lap_ms=3000), telemetry(SIM_HELLO, seq, run_id="r-1", lap_n=n))
+    for _ in range(extra_telemetry):
+        seq += 1
+        connection.send(telemetry(SIM_HELLO, seq, run_id="r-1", lap_n=laps))
+
+
+def test_lap_target_sends_a_single_stop(page: Page, capture: Capture, live_url: str) -> None:
+    server = FakeServer(page, open_session(SIM_HELLO, SIM_CONFIG))
+    page.goto(live_url)
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    _set_lap_target(page, "2")
+    expect(_by_id(page, "lap-target-input")).not_to_have_attribute("aria-invalid", "true")
+
+    _run_laps(server, 2, extra_telemetry=5)
+    _wait_for(lambda: len(server.commands("stop")) == 1, page)
+    expect(_by_id(page, "lap-target")).to_have_text(" / 2")
+    page.wait_for_timeout(300)
+    assert len(server.commands("stop")) == 1
+    assert capture.console_errors == []
+
+
+def test_empty_or_invalid_lap_target_never_stops(page: Page, capture: Capture, live_url: str) -> None:
+    server = FakeServer(page, open_session(SIM_HELLO, SIM_CONFIG))
+    page.goto(live_url)
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+
+    for text in ("0", "1.5"):
+        _set_lap_target(page, text)
+        expect(_by_id(page, "lap-target-input")).to_have_attribute("aria-invalid", "true")
+
+    _run_laps(server, 3)
+    expect(_by_id(page, "lap-n")).to_have_text("3")
+    page.wait_for_timeout(300)
+    assert server.commands("stop") == []
+
+    _set_lap_target(page, "")
+    expect(_by_id(page, "lap-target-input")).to_have_attribute("aria-invalid", "false")
+    page.wait_for_timeout(200)
+    assert server.commands("stop") == []
+    assert capture.console_errors == []
+
+
+def test_rejected_set_profile_changes_no_mark(page: Page, capture: Capture, live_url: str) -> None:
+    """US4-5: si el servidor rechaza un `set_profile`, se muestra el error y ninguna marca cambia."""
+    server = FakeServer(page, open_session(SIM_HELLO, SIM_CONFIG))
+    page.goto(live_url)
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    _by_id(page, "tab-calibration").click()
+
+    _calibrate(page, {"wheelbase_m": "0.128", "adc_noise": "40"})
+    expected = {"cmd": "set_profile", "measured": {"adc_noise": 40, "wheelbase_m": 0.128}}
+    _wait_for(lambda: server.commands("set_profile") == [expected], page)
+    server.last.send({"type": "error", "v": 1, "t_ms": 2000, "code": "out_of_range", "cmd": "set_profile",
+                      "message": "adc_noise fuera de rango"})
+    error = _by_id(page, "log").locator('li[data-kind="error"]')
+    expect(error).to_have_count(1)
+    expect(error).to_contain_text("out_of_range · set_profile")
+    expect(_by_id(page, "calib-wheelbase_m-state")).to_have_text("POR DEFECTO")
+    expect(_by_id(page, "calib-adc_noise-state")).to_have_text("POR DEFECTO")
+    # Lo escrito queda en los campos para corregirlo.
+    expect(_by_id(page, "calib-adc_noise")).to_have_value("40")
+
+    # Aceptado (`config`): se marcan los enviados y sus campos se vacían.
+    _by_id(page, "btn-calib-apply").click()
+    _wait_for(lambda: len(server.commands("set_profile")) == 2, page)
+    server.last.send({**SIM_CONFIG, "t_ms": 2500})
+    expect(_by_id(page, "calib-wheelbase_m-state")).to_have_text("MEDIDO 0.128 m")
+    expect(_by_id(page, "calib-adc_noise-state")).to_have_text("MEDIDO 40 ADC (±)")
+    expect(_by_id(page, "calib-adc_noise")).to_have_value("")
+    assert capture.console_errors == []
+
+
+# Cada pestaña es lo que se ve en su centro (nada la tapa), VUELTAS queda bajo Control y dentro
+# de la columna, su lista desplaza por dentro y Corridas sigue visible.
+RIGHT_COLUMN_LAYOUT = """() => {
+  const rect = (selector) => document.querySelector(selector).getBoundingClientRect();
+  const tabs = ["tab-tuning", "tab-robot-track", "tab-calibration"].map((id) => {
+    const tab = document.querySelector(`[data-testid="${id}"]`);
+    const box = tab.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    return tab.contains(hit);
+  });
+  const history = document.querySelector('[data-testid="lap-history"]');
+  const control = rect(".card-control");
+  const laps = rect(".card-laps");
+  const runs = rect(".card-runs");
+  const column = rect(".column-right");
+  return {
+    tabs,
+    lapsBelowControl: laps.top >= control.bottom - 0.5,
+    lapsInsideColumn: laps.bottom <= column.bottom + 0.5,
+    historyScrolls: history.scrollHeight > history.clientHeight,
+    runsHeight: runs.height,
+    items: history.children.length,
+  };
+}"""
+
+
+def test_long_lap_history_never_covers_the_tabs(page: Page, capture: Capture, live_url: str) -> None:
+    """Con más de 100 vueltas, la lista desplaza dentro de VUELTAS y las pestañas siguen visibles."""
+    server = FakeServer(page, open_session(SIM_HELLO, SIM_CONFIG))
+    page.goto(live_url)
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    connection = server.last
+    connection.send(event("run_started", "r-1", 2000), telemetry(SIM_HELLO, 1, run_id="r-1"))
+    for n in range(1, 121):
+        connection.send(event("lap", "r-1", 2000 + n * 3000, lap=n, lap_ms=3000 + n))
+    expect(_by_id(page, "lap-n")).to_have_text("120")
+
+    for tab in ("tuning", "robot-track", "calibration"):
+        _by_id(page, f"tab-{tab}").click()
+        page.wait_for_timeout(100)
+        layout = page.evaluate(RIGHT_COLUMN_LAYOUT)
+        assert layout["items"] == 100, layout
+        assert layout["tabs"] == [True, True, True], (tab, layout)
+        assert layout["lapsBelowControl"] and layout["lapsInsideColumn"], (tab, layout)
+        assert layout["historyScrolls"], (tab, layout)
+        assert layout["runsHeight"] >= 60, (tab, layout)
+    assert capture.console_errors == []
+
+
+def _lap_items(page: Page):
+    return _by_id(page, "lap-history").locator("li")
+
+
+def test_lap_after_a_config_change_is_marked(page: Page, capture: Capture, live_url: str) -> None:
+    """La primera vuelta completada después de un `config` que cambia valores lleva «⚙ campo
+    antes→después»; `set_config` sigue sin anotarse en el registro."""
+    server = FakeServer(page, open_session(SIM_HELLO, SIM_CONFIG))
+    page.goto(live_url)
+    expect(_by_id(page, "kp-input")).to_have_value("0.0450")
+    connection = server.last
+    connection.send(event("run_started", "r-1", 2000), telemetry(SIM_HELLO, 1, run_id="r-1"))
+    connection.send(event("lap", "r-1", 5000, lap=1, lap_ms=3000))
+
+    # Un ajuste confirmado durante la corrida: kp y base_speed (dos `config` antes de la vuelta).
+    _commit(page, "kp-input", "0.08")
+    _wait_for(lambda: len(server.commands("set_config")) == 1, page)
+    connection.send({**SIM_CONFIG, "t_ms": 5500, "params": {"kp": 0.08, "ki": 0, "kd": 0.9}})
+    _commit(page, "base-speed-input", "200")
+    _wait_for(lambda: len(server.commands("set_config")) == 2, page)
+    connection.send({**SIM_CONFIG, "t_ms": 5600, "params": {"kp": 0.08, "ki": 0, "kd": 0.9}, "base_speed": 200})
+    # Solo frecuencia: no cambia el comportamiento del robot y no se marca.
+    connection.send({**SIM_CONFIG, "t_ms": 5700, "params": {"kp": 0.08, "ki": 0, "kd": 0.9}, "base_speed": 200, "rate_hz": 100})
+    connection.send(event("lap", "r-1", 8000, lap=2, lap_ms=2900))
+    connection.send(event("lap", "r-1", 11000, lap=3, lap_ms=2850))
+
+    expect(_lap_items(page)).to_have_count(3)
+    expect(_lap_items(page).nth(1)).to_contain_text("⚙ kp 0.0450→0.0800 · base 180→200")
+    expect(_lap_items(page).nth(0)).not_to_contain_text("⚙")
+    expect(_lap_items(page).nth(2)).not_to_contain_text("⚙")
+
+    # Un cambio que se deshace antes de completar la vuelta no deja marca.
+    connection.send({**SIM_CONFIG, "t_ms": 11500, "params": {"kp": 0.05, "ki": 0, "kd": 0.9}, "base_speed": 200, "rate_hz": 100})
+    connection.send({**SIM_CONFIG, "t_ms": 11600, "params": {"kp": 0.08, "ki": 0, "kd": 0.9}, "base_speed": 200, "rate_hz": 100})
+    connection.send(event("lap", "r-1", 14000, lap=4, lap_ms=2800))
+    expect(_lap_items(page)).to_have_count(4)
+    expect(_lap_items(page).nth(0)).not_to_contain_text("⚙")
+
+    expect(_by_id(page, "log").locator('li[data-kind="local"]')).to_have_count(0)
+    assert capture.console_errors == []
+
+
+def test_unknown_track_on_connect_is_shown(page: Page, capture: Capture, live_url: str) -> None:
+    """Como el simulador ante `?track=no-existe`: abre igual y avisa con un `error` sin `cmd`."""
+    unknown = {"type": "error", "v": 1, "t_ms": 1, "code": "unknown_track",
+               "message": "la pista «no-existe» no está en el catálogo; se usa oval-01"}
+    FakeServer(page, lambda connection: connection.send(SIM_HELLO, SIM_CONFIG, unknown))
+    page.goto(live_url)
+    error = _by_id(page, "log").locator('li[data-kind="error"]')
+    expect(error).to_have_count(1)
+    expect(error).to_contain_text("unknown_track")
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    assert capture.console_errors == []
+
+
+def test_reconnect_reuses_the_chosen_track(page: Page, capture: Capture, live_url: str) -> None:
+    """Tras cambiar de pista, Reconectar repite `track` y `robot` de la última conexión."""
+    server = FakeServer(page, open_session(SIM_HELLO, SIM_CONFIG))
+    page.goto(live_url)
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    _open_robot_track_tab(page)
+    page.once("dialog", lambda dialog: dialog.accept())
+    _by_id(page, "track-select").select_option("oval-01")
+    _wait_for(lambda: len(server.connections) == 2, page)
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+
+    server.last.close()
+    expect(_by_id(page, "btn-reconnect")).to_be_visible()
+    _by_id(page, "btn-reconnect").click()
+    _wait_for(lambda: len(server.connections) == 3, page)
+    urls = [connection.url for connection in server.connections]
+    assert "track=oval-01" in urls[1] and "robot=velocista-01" in urls[1]
+    assert urls[2] == urls[1]
+    assert capture.console_errors == []
+
+
+def test_server_closing_shows_disconnected(page: Page, capture: Capture, live_url: str) -> None:
+    server = FakeServer(page, open_session(SIM_HELLO, SIM_CONFIG))
+    page.goto(live_url)
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    server.last.close()
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "closed")
+    expect(_by_id(page, "conn-status")).to_have_text("DESCONECTADO")
+    expect(_by_id(page, "btn-reconnect")).to_be_visible()
+    expect(_by_id(page, "btn-start")).to_be_disabled()
+    expect(_by_id(page, "lap-target-input")).to_be_disabled()
+    expect(_by_id(page, "kp-input")).to_be_disabled()
+    expect(_by_id(page, "kp-range")).to_be_disabled()
+    expect(_by_id(page, "rate-input")).to_be_disabled()
+    assert capture.console_errors == []
+
+
+def test_full_server_then_reconnect(page: Page, capture: Capture, live_url: str) -> None:
+    """Como el simulador con las sesiones al máximo: acepta y cierra con 1013 sin `hello`."""
+    server = FakeServer(page)
+    page.goto(live_url)
+    _wait_for(lambda: len(server.connections) == 1, page)
+    server.last.close(code=1013)
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "closed")
+    expect(page.locator('[data-role="conn-message"]')).to_contain_text("Servidor lleno")
+    expect(_by_id(page, "btn-reconnect")).to_be_visible()
+
+    _by_id(page, "btn-reconnect").click()
+    _wait_for(lambda: len(server.connections) == 2, page)
+    server.last.send(SIM_HELLO, SIM_CONFIG)
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    expect(_by_id(page, "robot-id")).to_have_text("velocista-01")
+    expect(_by_id(page, "btn-reconnect")).to_be_hidden()
+    assert capture.console_errors == []
