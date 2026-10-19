@@ -37,6 +37,7 @@ export function createState() {
     summaries: [],
     log: [],
     drafts: createDrafts(),
+    fileTracks: new Set(),  // pistas que solo existen en esta sesión (cargadas por archivo)
     lastTMs: null,
     dirty: true,
   };
@@ -73,10 +74,19 @@ export function applyMessage(state, message) {
     // config: valores confirmados (fuente de verdad de los controles, FR-013). Resuelve como
     // aceptado el pendiente más antiguo; con la cola vacía (apertura de sesión) solo actualiza.
     // Los controles que no se están arrastrando toman los valores confirmados.
+    // Un `load` aceptado limpia el rastro y reinicia la calibración; un `load_track` aceptado
+    // limpia el rastro aunque el `track_id` no cambie (research R5, FR-018).
     case "config": {
       state.config = message;
       syncDrafts(state, false);
       const command = state.pending.shift();
+      if (command?.cmd === "load") {
+        clearTrail(state.trail);
+        state.calibration = null;
+      } else if (command?.cmd === "load_track") {
+        clearTrail(state.trail);
+        rememberFileTrack(state, message.track_id);
+      }
       return command ? { command, accepted: true } : null;
     }
 
@@ -224,6 +234,17 @@ export function shouldAutoStop(state) {
 /** Recuerda que la corrida activa ya recibió su `stop` automático (una sola vez por `run_id`). */
 export function markAutoStop(state) {
   state.lapTarget.stopSentFor = state.run.runId;
+}
+
+/**
+ * Recuerda una pista cargada por archivo que no está en el catálogo del servidor. El servidor la
+ * lista en `catalog` mientras dure la sesión, pero una sesión nueva no la conoce: en el selector
+ * se muestra como «(archivo)» y no se puede elegir. Si su id ya estaba en el catálogo, la del
+ * catálogo sigue disponible al reconectar y no se marca.
+ */
+function rememberFileTrack(state, trackId) {
+  if (!trackId || state.catalog?.tracks.includes(trackId)) return;
+  state.fileTracks.add(trackId);
 }
 
 /** Valores en edición de los controles de ajuste: sin valor hasta el primer `config`. */

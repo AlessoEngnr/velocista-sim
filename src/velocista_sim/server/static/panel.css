@@ -499,6 +499,46 @@ dd {
   overflow-y: auto;
 }
 
+/* Pestaña Robot y pista */
+.select {
+  width: 100%;
+  font-family: var(--font-mono);
+}
+
+.file {
+  width: 100%;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--size-secondary);
+}
+
+.file:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.file:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 1px;
+}
+
+.robot-track-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.hint {
+  margin: 0;
+  color: var(--warn);
+  font-size: var(--size-secondary);
+}
+
+.hint::before {
+  content: "⚠ ";
+}
+
 /* Pestaña Ajuste: rótulo | slider | campo numérico | unidad */
 .tuning-row {
   display: grid;

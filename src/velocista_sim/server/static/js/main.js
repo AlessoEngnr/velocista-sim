@@ -12,6 +12,7 @@ import { renderController } from "./views/controller.js";
 import { byTestId, setHidden, watchSize } from "./views/dom.js";
 import { renderLaps } from "./views/laps.js";
 import { renderLog } from "./views/log.js";
+import { initRobotTrack, renderRobotTrack } from "./views/robot-track.js";
 import { renderRuns } from "./views/runs.js";
 import { renderSensors } from "./views/sensors.js";
 import { renderTopbar } from "./views/topbar.js";
@@ -22,7 +23,7 @@ import { initTrail, renderTrail } from "./views/trail-view.js";
 const LOGGED_COMMANDS = new Set(["start", "stop", "reset", "load", "load_track", "set_profile"]);
 
 // Vistas que se redibujan en cada cuadro sucio, en este orden.
-const VIEWS = [renderTopbar, renderSensors, renderController, renderTrail, renderLaps, renderRuns, renderControl, renderLog];
+const VIEWS = [renderTopbar, renderSensors, renderController, renderTrail, renderLaps, renderRuns, renderControl, renderRobotTrack, renderLog];
 
 const root = document;
 const state = createState();
@@ -69,9 +70,16 @@ function open(url = buildUrl()) {
   });
 }
 
-function reconnect() {
+/**
+ * Descarta la sesión y abre otra (research R15). Con `track`/`robot` (cambio de pista, FR-026)
+ * la URL lleva esos parámetros de conexión; sin ellos (botón Reconectar) repite la URL de la
+ * última conexión, así se vuelve a la pista y el robot elegidos. Si el servidor no conoce la
+ * pista o el robot, abre igual y avisa con `unknown_track`/`unknown_robot`, que van al registro.
+ */
+function reconnect({ track, robot } = {}) {
+  const url = track || robot ? buildUrl({ track, robot }) : (state.connection.url ?? buildUrl());
   resetSession(state);
-  open();
+  open(url);
 }
 
 /**
@@ -131,7 +139,8 @@ function watchDragging(panel) {
 
 initControl(root, state, sendCommand);
 watchDragging(root.getElementById("panel-tuning"));
-byTestId(root, "btn-reconnect").addEventListener("click", reconnect);
+initRobotTrack(root, state, { send: sendCommand, reconnect });
+byTestId(root, "btn-reconnect").addEventListener("click", () => reconnect());
 initTrail(root, state);
 watchSize(byTestId(root, "sensors-canvas"), markDirty);
 watchSize(byTestId(root, "trail-canvas"), markDirty);

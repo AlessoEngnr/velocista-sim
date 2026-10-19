@@ -2,13 +2,16 @@
 
 Contra un uvicorn real: el panel abre su sesión, muestra `hello`/`config`, controla una corrida
 (Iniciar → EN CORRIDA → Detener → resumen → Reiniciar), ajusta el controlador (`set_config`,
-`set_rate`, envío limitado al arrastrar) y todo frame cumple el contrato. Con un
-servidor falso (`route_web_socket`): errores en el registro, controles que vuelven al `config`
-ante un rechazo, vueltas objetivo y desconexión.
+`set_rate`, envío limitado al arrastrar), cambia de robot y de pista, carga pistas desde archivo
+y todo frame cumple el contrato. Con un servidor falso (`route_web_socket`): errores en el
+registro, controles que vuelven al `config` ante un rechazo, vueltas objetivo, `unknown_track` de
+la conexión, desconexión y reconexión.
 """
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Callable
 
 from playwright.sync_api import Page, expect
@@ -28,6 +31,12 @@ def _wait_for(condition: Callable[[], bool], page: Page, timeout_ms: int = 5000)
             return
         page.wait_for_timeout(50)
     assert condition(), "la condición no se cumplió a tiempo"
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+OVAL_01 = REPO_ROOT / "config" / "tracks" / "oval-01.json"
+GAPS_OVERLAP = REPO_ROOT / "contract" / "examples" / "invalid" / "track" / "gaps-overlap.json"
+STOP_TO_CHANGE = "Detené la corrida para cambiar esto"
 
 
 def _seq(page: Page) -> int:
@@ -191,6 +200,118 @@ def test_tuning_during_a_run_marks_config_changed(page: Page, capture: Capture, 
     assert capture.console_errors == []
 
 
+def _received_hellos(capture: Capture) -> list[dict]:
+    return [message for message in capture.received() if message.get("type") == "hello"]
+
+
+def _open_robot_track_tab(page: Page) -> None:
+    _by_id(page, "tab-robot-track").click()
+    expect(_by_id(page, "robot-select")).to_be_visible()
+
+
+def test_robot_and_track_selection(page: Page, capture: Capture, live_url: str, tmp_path: Path) -> None:
+    page.goto(live_url)
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    _wait_for(lambda: any(m.get("type") == "catalog" for m in capture.received()), page)
+    _open_robot_track_tab(page)
+
+    # Catálogo con el robot y la pista vigentes marcados.
+    robot_option = _by_id(page, "robot-select").locator('option[value="velocista-01"]')
+    track_option = _by_id(page, "track-select").locator('option[value="oval-01"]')
+    expect(robot_option).to_have_attribute("data-current", "true")
+    expect(robot_option).to_contain_text("vigente")
+    expect(track_option).to_have_attribute("data-current", "true")
+
+    # Con una corrida activa todo queda deshabilitado, con el aviso.
+    _by_id(page, "btn-start").click()
+    expect(_by_id(page, "run-status")).to_have_attribute("data-state", "running")
+    for test_id in ("robot-select", "track-select", "track-file", "btn-catalog-refresh"):
+        expect(_by_id(page, test_id)).to_be_disabled()
+    expect(page.locator('[data-role="robot-track-hint"]')).to_be_visible()
+    expect(page.locator('[data-role="robot-track-hint"]')).to_have_text(STOP_TO_CHANGE)
+    _wait_for(lambda: _trail_points(page) > 0, page)
+    _by_id(page, "btn-stop").click()
+    expect(_by_id(page, "run-status")).to_have_attribute("data-state", "idle")
+    expect(_by_id(page, "robot-select")).to_be_enabled()
+    expect(page.locator('[data-role="robot-track-hint"]')).to_be_hidden()
+    assert _trail_points(page) > 0
+
+    # Elegir robot: `load`, nuevo `hello` + `config` y rastro limpio.
+    _by_id(page, "robot-select").select_option("velocista-01")
+    _wait_for(lambda: {"cmd": "load", "robot_id": "velocista-01"} in capture.sent(), page)
+    _wait_for(lambda: len(_received_hellos(capture)) == 2, page)
+    expect(_by_id(page, "trail-canvas")).to_have_attribute("data-points", "0")
+    expect(_by_id(page, "robot-id")).to_have_text("velocista-01")
+    expect(_by_id(page, "kp-input")).to_be_enabled()
+
+    # Archivo de pista válido: `load_track` con su contenido.
+    _by_id(page, "track-file").set_input_files(str(OVAL_01))
+    _wait_for(lambda: any(c["cmd"] == "load_track" for c in capture.sent()), page)
+    expect(_by_id(page, "track-id")).to_have_text("oval-01")
+
+    # Archivo que no es JSON: error local y nada enviado.
+    sent = len(capture.sent())
+    not_json = tmp_path / "pista.txt"
+    not_json.write_text("esto no es una pista", encoding="utf-8")
+    _by_id(page, "track-file").set_input_files(str(not_json))
+    expect(_by_id(page, "log").locator('li[data-kind="local"]').first).to_contain_text("El archivo no es JSON válido")
+    page.wait_for_timeout(200)
+    assert len(capture.sent()) == sent
+
+    # JSON que no cumple track v1: `invalid_track` y la pista no cambia.
+    invalid = tmp_path / "gaps-overlap.json"
+    invalid.write_text(json.dumps(json.loads(GAPS_OVERLAP.read_text(encoding="utf-8"))["message"]), encoding="utf-8")
+    _by_id(page, "track-file").set_input_files(str(invalid))
+    expect(_by_id(page, "log").locator('li[data-kind="error"]').first).to_contain_text("invalid_track")
+    expect(_by_id(page, "track-id")).to_have_text("oval-01")
+
+    # Elegir pista y cancelar el aviso: no se reconecta.
+    page.once("dialog", lambda dialog: dialog.dismiss())
+    _by_id(page, "track-select").select_option("oval-01")
+    page.wait_for_timeout(300)
+    assert len(capture.sockets) == 1
+
+    # Elegir pista y aceptar: sesión nueva con `track` y `robot` en la URL.
+    page.once("dialog", lambda dialog: dialog.accept())
+    _by_id(page, "track-select").select_option("oval-01")
+    _wait_for(lambda: len(capture.sockets) == 2, page)
+    assert "track=oval-01" in capture.sockets[1] and "robot=velocista-01" in capture.sockets[1]
+    _wait_for(lambda: len(_received_hellos(capture)) == 3, page)
+    hellos = _received_hellos(capture)
+    assert hellos[2]["session_id"] != hellos[0]["session_id"]
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    expect(_by_id(page, "track-id")).to_have_text("oval-01")
+
+    # El `load_track` con la pista inválida no cumple el contrato a propósito: el panel envía el
+    # archivo tal cual y el servidor lo rechaza. Todo lo demás se valida.
+    assert_frames_valid([f for f in capture.frames if '"straight-open"' not in f.payload])
+    assert capture.console_errors == []
+
+
+def test_file_track_is_marked_and_cannot_be_reopened(page: Page, capture: Capture, live_url: str, tmp_path: Path) -> None:
+    """Una pista cargada por archivo solo existe en esta sesión: aparece como «(archivo)» y deshabilitada."""
+    track = json.loads(OVAL_01.read_text(encoding="utf-8"))
+    track["id"] = "oval-copia"
+    copy = tmp_path / "oval-copia.json"
+    copy.write_text(json.dumps(track), encoding="utf-8")
+
+    page.goto(live_url)
+    _wait_for(lambda: any(m.get("type") == "catalog" for m in capture.received()), page)
+    _open_robot_track_tab(page)
+    _by_id(page, "track-file").set_input_files(str(copy))
+    expect(_by_id(page, "track-id")).to_have_text("oval-copia")
+
+    _by_id(page, "btn-catalog-refresh").click()
+    _wait_for(lambda: sum(m.get("type") == "catalog" for m in capture.received()) == 2, page)
+    option = _by_id(page, "track-select").locator('option[value="oval-copia"]')
+    expect(option).to_contain_text("(archivo)")
+    expect(option).to_be_disabled()
+    expect(option).to_have_attribute("data-current", "true")
+    expect(_by_id(page, "track-select").locator('option[value="oval-01"]')).to_be_enabled()
+    assert_frames_valid(capture.frames)
+    assert capture.console_errors == []
+
+
 # --- Servidor falso --------------------------------------------------------------------------
 
 
@@ -292,6 +413,40 @@ def test_empty_or_invalid_lap_target_never_stops(page: Page, capture: Capture, l
     expect(_by_id(page, "lap-target-input")).to_have_attribute("aria-invalid", "false")
     page.wait_for_timeout(200)
     assert server.commands("stop") == []
+    assert capture.console_errors == []
+
+
+def test_unknown_track_on_connect_is_shown(page: Page, capture: Capture, live_url: str) -> None:
+    """Como el simulador ante `?track=no-existe`: abre igual y avisa con un `error` sin `cmd`."""
+    unknown = {"type": "error", "v": 1, "t_ms": 1, "code": "unknown_track",
+               "message": "la pista «no-existe» no está en el catálogo; se usa oval-01"}
+    FakeServer(page, lambda connection: connection.send(SIM_HELLO, SIM_CONFIG, unknown))
+    page.goto(live_url)
+    error = _by_id(page, "log").locator('li[data-kind="error"]')
+    expect(error).to_have_count(1)
+    expect(error).to_contain_text("unknown_track")
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    assert capture.console_errors == []
+
+
+def test_reconnect_reuses_the_chosen_track(page: Page, capture: Capture, live_url: str) -> None:
+    """Tras cambiar de pista, Reconectar repite `track` y `robot` de la última conexión."""
+    server = FakeServer(page, open_session(SIM_HELLO, SIM_CONFIG))
+    page.goto(live_url)
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    _open_robot_track_tab(page)
+    page.once("dialog", lambda dialog: dialog.accept())
+    _by_id(page, "track-select").select_option("oval-01")
+    _wait_for(lambda: len(server.connections) == 2, page)
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+
+    server.last.close()
+    expect(_by_id(page, "btn-reconnect")).to_be_visible()
+    _by_id(page, "btn-reconnect").click()
+    _wait_for(lambda: len(server.connections) == 3, page)
+    urls = [connection.url for connection in server.connections]
+    assert "track=oval-01" in urls[1] and "robot=velocista-01" in urls[1]
+    assert urls[2] == urls[1]
     assert capture.console_errors == []
 
 

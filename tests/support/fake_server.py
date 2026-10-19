@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from typing import Callable
 
 from playwright.sync_api import Page, WebSocketRoute
@@ -67,6 +68,7 @@ class FakeConnection:
 
     def __init__(self, route: WebSocketRoute) -> None:
         self.route = route
+        self.url = route.url
         self.hello: dict | None = None
         self.commands: list[dict] = []
         route.on_message(self._on_message)
@@ -98,7 +100,8 @@ class FakeServer:
     def __init__(self, page: Page, on_open: Callable[[FakeConnection], None] | None = None) -> None:
         self.connections: list[FakeConnection] = []
         self._on_open = on_open
-        page.route_web_socket("**/ws", self._handle)
+        # `/ws` con o sin parámetros de conexión (`?track=&robot=`).
+        page.route_web_socket(re.compile(r"/ws(\?.*)?$"), self._handle)
 
     def _handle(self, route: WebSocketRoute) -> None:
         connection = FakeConnection(route)
