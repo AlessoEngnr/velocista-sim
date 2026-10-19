@@ -5,7 +5,7 @@
 import * as commands from "./commands.js";
 import { buildUrl, connect, send } from "./connection.js";
 import {
-  addLog, applyMessage, createState, enqueuePending, markAutoStop, resetSession, shouldAutoStop,
+  addLog, applyMessage, createState, enqueuePending, markAutoStop, resetSession, setDragging, shouldAutoStop,
 } from "./state.js";
 import { initControl, renderControl } from "./views/control.js";
 import { renderController } from "./views/controller.js";
@@ -110,7 +110,27 @@ function markDirty() {
   state.dirty = true;
 }
 
+/**
+ * Marca el slider de ajuste que el usuario arrastra, para que un `config` entrante no se lo
+ * mueva (FR-013, data-model.md ControlDrafts). Al soltar, el siguiente `config` lo ubica en el
+ * valor confirmado. Los envíos del slider salen por `sendCommand` (control.js), que encola los
+ * pendientes; `config` y los `error` de `set_config`/`set_rate` marcan `dirty` en `onMessage`
+ * y los controles se redibujan en el siguiente cuadro.
+ */
+function watchDragging(panel) {
+  const field = (event) => (event.target.type === "range" ? event.target.dataset.field : undefined);
+  panel.addEventListener("pointerdown", (event) => {
+    if (field(event)) setDragging(state, field(event), true);
+  });
+  for (const type of ["pointerup", "pointercancel", "change"]) {
+    panel.addEventListener(type, (event) => {
+      if (field(event)) setDragging(state, field(event), false);
+    });
+  }
+}
+
 initControl(root, state, sendCommand);
+watchDragging(root.getElementById("panel-tuning"));
 byTestId(root, "btn-reconnect").addEventListener("click", reconnect);
 initTrail(root, state);
 watchSize(byTestId(root, "sensors-canvas"), markDirty);

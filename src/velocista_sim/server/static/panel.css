@@ -499,6 +499,49 @@ dd {
   overflow-y: auto;
 }
 
+/* Pestaña Ajuste: rótulo | slider | campo numérico | unidad */
+.tuning-row {
+  display: grid;
+  grid-template-columns: 9ch minmax(0, 1fr) 9ch 2.75rem;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.tuning-row label,
+.tuning-row .unit {
+  color: var(--muted);
+  font-size: var(--size-label);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.tuning-row .input {
+  width: 100%;
+  min-width: 9ch;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.range {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.range:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.range:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+
 /* --- Registro (FR-042: error con color y símbolo) -------------------------------------- */
 
 .log li {

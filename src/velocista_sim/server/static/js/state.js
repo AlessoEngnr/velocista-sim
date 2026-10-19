@@ -14,6 +14,10 @@ const SUMMARIES_LIMIT = 50;
 // cola de pendientes; `start`, `stop`, `list` y `reset` no.
 const PENDING_COMMANDS = new Set(["set_config", "set_rate", "set_profile", "load", "load_track"]);
 
+// Campos de ajuste con control propio en la pestaña Ajuste (data-model.md, ControlDrafts).
+export const DRAFT_FIELDS = ["kp", "ki", "kd", "base_speed", "rate_hz"];
+const GAINS = new Set(["kp", "ki", "kd"]);
+
 /** Estado vacío de una pestaña recién abierta (forma de `PanelState`, data-model.md). */
 export function createState() {
   return {
@@ -32,7 +36,7 @@ export function createState() {
     calibration: null,
     summaries: [],
     log: [],
-    drafts: null,
+    drafts: createDrafts(),
     lastTMs: null,
     dirty: true,
   };
@@ -68,8 +72,10 @@ export function applyMessage(state, message) {
 
     // config: valores confirmados (fuente de verdad de los controles, FR-013). Resuelve como
     // aceptado el pendiente más antiguo; con la cola vacía (apertura de sesión) solo actualiza.
+    // Los controles que no se están arrastrando toman los valores confirmados.
     case "config": {
       state.config = message;
+      syncDrafts(state, false);
       const command = state.pending.shift();
       return command ? { command, accepted: true } : null;
     }
@@ -90,7 +96,8 @@ export function applyMessage(state, message) {
       return null;
 
     // error: se muestra en el registro. Con `cmd`, rechaza el pendiente más antiguo con ese
-    // `cmd`; si no hay ninguno (o no trae `cmd`), la cola no cambia.
+    // `cmd`; si no hay ninguno (o no trae `cmd`), la cola no cambia. Un `set_config` o
+    // `set_rate` rechazado devuelve todos los controles al último `config` (FR-013).
     case "error": {
       addLog(state, {
         kind: "error", tMs: message.t_ms, text: message.message, code: message.code, cmd: message.cmd ?? null,
@@ -99,6 +106,7 @@ export function applyMessage(state, message) {
       const index = state.pending.findIndex((pending) => pending.cmd === message.cmd);
       if (index < 0) return null;
       const [command] = state.pending.splice(index, 1);
+      if (command.cmd === "set_config" || command.cmd === "set_rate") syncDrafts(state, true);
       return { command, accepted: false };
     }
 
@@ -216,6 +224,39 @@ export function shouldAutoStop(state) {
 /** Recuerda que la corrida activa ya recibió su `stop` automático (una sola vez por `run_id`). */
 export function markAutoStop(state) {
   state.lapTarget.stopSentFor = state.run.runId;
+}
+
+/** Valores en edición de los controles de ajuste: sin valor hasta el primer `config`. */
+function createDrafts() {
+  return Object.fromEntries(DRAFT_FIELDS.map((field) => [field, { value: null, dragging: false }]));
+}
+
+/** Valor confirmado de un campo de ajuste en el `config` vigente (o `null`). */
+export function confirmedValue(config, field) {
+  if (!config) return null;
+  return GAINS.has(field) ? (config.params?.[field] ?? null) : (config[field] ?? null);
+}
+
+/**
+ * Lleva los drafts al último `config`. Sin `all`, respeta los que el usuario está arrastrando
+ * para que un `config` entrante no le "robe" el slider (data-model.md, ControlDrafts).
+ */
+function syncDrafts(state, all) {
+  for (const field of DRAFT_FIELDS) {
+    const draft = state.drafts[field];
+    if (all || !draft.dragging) draft.value = confirmedValue(state.config, field);
+  }
+}
+
+/** Fija el valor en edición de un control (lo que el usuario movió o escribió). */
+export function setDraft(state, field, value) {
+  state.drafts[field].value = value;
+  state.dirty = true;
+}
+
+/** Marca si el usuario está arrastrando el slider de `field`. */
+export function setDragging(state, field, dragging) {
+  state.drafts[field].dragging = dragging;
 }
 
 /** Encola un comando enviado si es de los que responden con `config` (research R5). */

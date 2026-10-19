@@ -1,8 +1,10 @@
 """Prueba de humo del panel con Playwright (specs/003-panel-laboratorio, research R12).
 
 Contra un uvicorn real: el panel abre su sesión, muestra `hello`/`config`, controla una corrida
-(Iniciar → EN CORRIDA → Detener → resumen → Reiniciar) y todo frame cumple el contrato. Con un
-servidor falso (`route_web_socket`): errores en el registro, vueltas objetivo y desconexión.
+(Iniciar → EN CORRIDA → Detener → resumen → Reiniciar), ajusta el controlador (`set_config`,
+`set_rate`, envío limitado al arrastrar) y todo frame cumple el contrato. Con un
+servidor falso (`route_web_socket`): errores en el registro, controles que vuelven al `config`
+ante un rechazo, vueltas objetivo y desconexión.
 """
 
 from __future__ import annotations
@@ -92,7 +94,121 @@ def test_run_start_stop_and_reset(page: Page, capture: Capture, live_url: str) -
     assert capture.console_errors == []
 
 
+def _set_configs(capture: Capture) -> list[dict]:
+    return [command for command in capture.sent() if command["cmd"] == "set_config"]
+
+
+def _commit(page: Page, test_id: str, text: str) -> None:
+    """Escribe en un campo numérico y lo confirma con Enter (dispara `change`)."""
+    field = _by_id(page, test_id)
+    field.fill(text)
+    field.press("Enter")
+
+
+# Arrastre del slider de `kp`: 50 eventos `input` con valores crecientes durante 1 s, entre
+# `pointerdown` y `pointerup` + `change`, como lo haría el mouse.
+DRAG_KP = """
+async (slider) => {
+  slider.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+  for (let i = 1; i <= 50; i++) {
+    slider.value = String(i * 0.0005);
+    slider.dispatchEvent(new Event("input", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  slider.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+  slider.dispatchEvent(new Event("change", { bubbles: true }));
+  return slider.value;
+}
+"""
+
+
+def test_tuning_sends_set_config_and_set_rate(page: Page, capture: Capture, live_url: str) -> None:
+    page.goto(live_url)
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    expect(_by_id(page, "kp-input")).to_have_value("0.0450")
+
+    # Campo numérico: envía el valor exacto al confirmar y muestra el `config` de respuesta.
+    _commit(page, "kp-input", "0.05")
+    _wait_for(lambda: {"cmd": "set_config", "params": {"kp": 0.05}} in capture.sent(), page)
+    expect(_by_id(page, "kp-input")).to_have_value("0.0500")
+    expect(_by_id(page, "kp-input")).to_have_attribute("aria-invalid", "false")
+
+    # Arrastre continuo: pocos envíos por segundo y siempre el valor final.
+    before = len(_set_configs(capture))
+    final = _by_id(page, "kp-range").evaluate(DRAG_KP)
+    assert float(final) == 0.025
+    _wait_for(lambda: _set_configs(capture)[-1] == {"cmd": "set_config", "params": {"kp": 0.025}}, page)
+    expect(_by_id(page, "kp-input")).to_have_value("0.0250")
+    page.wait_for_timeout(400)
+    dragged = _set_configs(capture)[before:]
+    assert 1 <= len(dragged) <= 7, f"{len(dragged)} set_config durante el arrastre"
+    assert dragged[-1] == {"cmd": "set_config", "params": {"kp": 0.025}}
+
+    # Valores inválidos: se marcan y no se envía nada.
+    sent = len(capture.sent())
+    _commit(page, "kp-input", "-1")
+    expect(_by_id(page, "kp-input")).to_have_attribute("aria-invalid", "true")
+    _commit(page, "rate-input", "150")
+    expect(_by_id(page, "rate-input")).to_have_attribute("aria-invalid", "true")
+    page.wait_for_timeout(200)
+    assert len(capture.sent()) == sent
+
+    # Frecuencia válida: `set_rate` y la barra superior muestra la confirmada.
+    _commit(page, "rate-input", "100")
+    _wait_for(lambda: {"cmd": "set_rate", "hz": 100} in capture.sent(), page)
+    expect(_by_id(page, "rate-hz")).to_have_text("100 Hz")
+    expect(_by_id(page, "rate-input")).to_have_value("100")
+    expect(_by_id(page, "rate-input")).to_have_attribute("aria-invalid", "false")
+
+    assert_frames_valid(capture.frames)
+    assert capture.console_errors == []
+
+
+def test_tuning_during_a_run_marks_config_changed(page: Page, capture: Capture, live_url: str) -> None:
+    page.goto(live_url)
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    expect(_by_id(page, "kp-input")).to_have_value("0.0450")
+
+    _by_id(page, "btn-start").click()
+    expect(_by_id(page, "run-status")).to_have_attribute("data-state", "running")
+    _commit(page, "kp-input", "0.04")
+    expect(_by_id(page, "kp-input")).to_have_value("0.0400")
+    _by_id(page, "btn-stop").click()
+
+    latest = _by_id(page, "summaries").locator("li").first
+    changed = latest.locator("div", has=page.locator("dt", has_text="CAMBIÓ CONFIG")).locator("dd")
+    expect(changed).to_have_text("sí")
+    assert_frames_valid(capture.frames)
+    assert capture.console_errors == []
+
+
 # --- Servidor falso --------------------------------------------------------------------------
+
+
+def test_rejected_tuning_returns_to_the_confirmed_config(page: Page, capture: Capture, live_url: str) -> None:
+    """Ante un `error` de `set_config`/`set_rate`, los controles vuelven al último `config` (FR-013)."""
+    server = FakeServer(page, open_session(SIM_HELLO, SIM_CONFIG))
+    page.goto(live_url)
+    expect(_by_id(page, "base-speed-input")).to_have_value("180")
+
+    _commit(page, "base-speed-input", "200")
+    _wait_for(lambda: server.commands("set_config") == [{"cmd": "set_config", "base_speed": 200}], page)
+    expect(_by_id(page, "base-speed-range")).to_have_value("200")
+    server.last.send({"type": "error", "v": 1, "t_ms": 2000, "code": "out_of_range", "cmd": "set_config",
+                      "message": "base_speed fuera de rango"})
+    expect(_by_id(page, "base-speed-input")).to_have_value("180")
+    expect(_by_id(page, "base-speed-range")).to_have_value("180")
+    expect(_by_id(page, "log").locator('li[data-kind="error"]')).to_have_count(1)
+
+    _commit(page, "rate-input", "20")
+    _wait_for(lambda: server.commands("set_rate") == [{"cmd": "set_rate", "hz": 20}], page)
+    server.last.send({"type": "error", "v": 1, "t_ms": 2500, "code": "out_of_range", "cmd": "set_rate",
+                      "message": "hz fuera de rango"})
+    expect(_by_id(page, "rate-input")).to_have_value("50")
+    expect(_by_id(page, "log").locator('li[data-kind="error"]')).to_have_count(2)
+    # Los envíos de ajuste no se anotan en el registro; solo sus errores.
+    expect(_by_id(page, "log").locator('li[data-kind="local"]')).to_have_count(0)
+    assert capture.console_errors == []
 
 
 def test_rejected_set_config_and_set_rate_appear_in_the_log(page: Page, capture: Capture, live_url: str) -> None:
@@ -180,6 +296,9 @@ def test_server_closing_shows_disconnected(page: Page, capture: Capture, live_ur
     expect(_by_id(page, "btn-reconnect")).to_be_visible()
     expect(_by_id(page, "btn-start")).to_be_disabled()
     expect(_by_id(page, "lap-target-input")).to_be_disabled()
+    expect(_by_id(page, "kp-input")).to_be_disabled()
+    expect(_by_id(page, "kp-range")).to_be_disabled()
+    expect(_by_id(page, "rate-input")).to_be_disabled()
     assert capture.console_errors == []
 
 
