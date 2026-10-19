@@ -36,7 +36,7 @@ def _wait_for(condition: Callable[[], bool], page: Page, timeout_ms: int = 5000)
 REPO_ROOT = Path(__file__).resolve().parents[2]
 OVAL_01 = REPO_ROOT / "config" / "tracks" / "oval-01.json"
 GAPS_OVERLAP = REPO_ROOT / "contract" / "examples" / "invalid" / "track" / "gaps-overlap.json"
-STOP_TO_CHANGE = "Detené la corrida para cambiar esto"
+STOP_TO_CHANGE = "Detén la corrida para cambiar esto"
 
 
 def _seq(page: Page) -> int:
