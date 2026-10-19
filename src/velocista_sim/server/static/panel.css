@@ -696,3 +696,70 @@ dd {
   min-width: 0;
   font-size: var(--size-secondary);
 }
+
+/* --- Pestaña Calibración: 12 parámetros con desplazamiento interno ---------------------- */
+
+#panel-calibration {
+  max-height: 340px;
+  padding-right: 4px;
+}
+
+.calib-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 9ch auto;
+  grid-template-areas:
+    "label input clear"
+    "label state state";
+  align-items: center;
+  gap: 2px 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.calib-label {
+  grid-area: label;
+  display: flex;
+  flex-direction: column;
+  color: var(--text);
+  font-size: var(--size-secondary);
+}
+
+.calib-help {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--size-label);
+}
+
+.calib-input {
+  grid-area: input;
+  width: 100%;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.calib-state {
+  grid-area: state;
+  min-width: 18ch;
+  text-align: right;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--size-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.calib-state[data-state="measured"] {
+  color: var(--best);
+}
+
+.calib-row .btn-small {
+  grid-area: clear;
+}
+
+.calib-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 8px;
+}

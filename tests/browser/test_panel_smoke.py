@@ -312,6 +312,75 @@ def test_file_track_is_marked_and_cannot_be_reopened(page: Page, capture: Captur
     assert capture.console_errors == []
 
 
+def _set_profiles(capture: Capture) -> list[dict]:
+    return [command for command in capture.sent() if command["cmd"] == "set_profile"]
+
+
+def _calibrate(page: Page, values: dict[str, str]) -> None:
+    for key, text in values.items():
+        _by_id(page, f"calib-{key}").fill(text)
+    _by_id(page, "btn-calib-apply").click()
+
+
+def test_calibration_sets_and_clears_measured_values(page: Page, capture: Capture, live_url: str) -> None:
+    page.goto(live_url)
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    _by_id(page, "tab-calibration").click()
+    expect(_by_id(page, "calib-wheelbase_m")).to_be_enabled()
+    for key in ("sensor_pitch_m", "adc_noise", "turbine_suction_n", "encoder_ticks_per_rev", "control_period_ms"):
+        expect(_by_id(page, f"calib-{key}-state")).to_have_text("POR DEFECTO")
+    expect(_by_id(page, "btn-calib-clear-wheelbase_m")).to_be_disabled()
+
+    # Valor válido: un único `set_profile` y la marca MEDIDO con el valor y la unidad.
+    _calibrate(page, {"wheelbase_m": "0.128"})
+    _wait_for(lambda: len(_set_profiles(capture)) == 1, page)
+    assert _set_profiles(capture) == [{"cmd": "set_profile", "measured": {"wheelbase_m": 0.128}}]
+    expect(_by_id(page, "calib-wheelbase_m-state")).to_have_text("MEDIDO 0.128 m")
+    expect(_by_id(page, "btn-calib-clear-wheelbase_m")).to_be_enabled()
+
+    # Fuera del rango del contrato, no es número o es decimal en un entero: se marca y no se
+    # envía nada (todo comando enviado cumple el contrato, FR-037). Uno válido junto a uno
+    # inválido tampoco se envía.
+    _calibrate(page, {"adc_noise": "-5", "motor_tau_ms": "50", "adc_white": "abc", "adc_black": "1.5", "wheelbase_m": "0"})
+    for key in ("adc_noise", "adc_white", "adc_black", "wheelbase_m"):
+        expect(_by_id(page, f"calib-{key}")).to_have_attribute("aria-invalid", "true")
+    expect(_by_id(page, "calib-motor_tau_ms")).to_have_attribute("aria-invalid", "false")
+    page.wait_for_timeout(200)
+    assert len(_set_profiles(capture)) == 1
+    expect(_by_id(page, "calib-motor_tau_ms-state")).to_have_text("POR DEFECTO")
+    expect(_by_id(page, "calib-wheelbase_m-state")).to_have_text("MEDIDO 0.128 m")
+
+    # Borrar: `null` para ese parámetro y vuelve a POR DEFECTO.
+    for key in ("adc_noise", "motor_tau_ms", "adc_white", "adc_black", "wheelbase_m"):
+        _by_id(page, f"calib-{key}").fill("")
+    _by_id(page, "btn-calib-clear-wheelbase_m").click()
+    _wait_for(lambda: _set_profiles(capture)[-1] == {"cmd": "set_profile", "measured": {"wheelbase_m": None}}, page)
+    expect(_by_id(page, "calib-wheelbase_m-state")).to_have_text("POR DEFECTO")
+
+    # Con una corrida activa, la calibración queda deshabilitada con el aviso.
+    _calibrate(page, {"adc_noise": "40"})
+    expect(_by_id(page, "calib-adc_noise-state")).to_have_text("MEDIDO 40 ADC (±)")
+    _by_id(page, "btn-start").click()
+    expect(_by_id(page, "run-status")).to_have_attribute("data-state", "running")
+    expect(_by_id(page, "btn-calib-apply")).to_be_disabled()
+    expect(_by_id(page, "calib-adc_noise")).to_be_disabled()
+    expect(_by_id(page, "btn-calib-clear-adc_noise")).to_be_disabled()
+    expect(page.locator('[data-role="calibration-hint"]')).to_have_text(STOP_TO_CHANGE)
+    _by_id(page, "btn-stop").click()
+    expect(_by_id(page, "btn-calib-apply")).to_be_enabled()
+    expect(page.locator('[data-role="calibration-hint"]')).to_be_hidden()
+
+    # Otro robot con `load`: el perfil se reinicia y todo vuelve a POR DEFECTO.
+    _open_robot_track_tab(page)
+    _by_id(page, "robot-select").select_option("velocista-01")
+    _wait_for(lambda: len(_received_hellos(capture)) == 2, page)
+    _by_id(page, "tab-calibration").click()
+    expect(_by_id(page, "calib-adc_noise-state")).to_have_text("POR DEFECTO")
+
+    assert_frames_valid(capture.frames)
+    assert capture.console_errors == []
+
+
 # --- Servidor falso --------------------------------------------------------------------------
 
 
@@ -413,6 +482,36 @@ def test_empty_or_invalid_lap_target_never_stops(page: Page, capture: Capture, l
     expect(_by_id(page, "lap-target-input")).to_have_attribute("aria-invalid", "false")
     page.wait_for_timeout(200)
     assert server.commands("stop") == []
+    assert capture.console_errors == []
+
+
+def test_rejected_set_profile_changes_no_mark(page: Page, capture: Capture, live_url: str) -> None:
+    """US4-5: si el servidor rechaza un `set_profile`, se muestra el error y ninguna marca cambia."""
+    server = FakeServer(page, open_session(SIM_HELLO, SIM_CONFIG))
+    page.goto(live_url)
+    expect(_by_id(page, "conn-status")).to_have_attribute("data-state", "open")
+    _by_id(page, "tab-calibration").click()
+
+    _calibrate(page, {"wheelbase_m": "0.128", "adc_noise": "40"})
+    expected = {"cmd": "set_profile", "measured": {"adc_noise": 40, "wheelbase_m": 0.128}}
+    _wait_for(lambda: server.commands("set_profile") == [expected], page)
+    server.last.send({"type": "error", "v": 1, "t_ms": 2000, "code": "out_of_range", "cmd": "set_profile",
+                      "message": "adc_noise fuera de rango"})
+    error = _by_id(page, "log").locator('li[data-kind="error"]')
+    expect(error).to_have_count(1)
+    expect(error).to_contain_text("out_of_range · set_profile")
+    expect(_by_id(page, "calib-wheelbase_m-state")).to_have_text("POR DEFECTO")
+    expect(_by_id(page, "calib-adc_noise-state")).to_have_text("POR DEFECTO")
+    # Lo escrito queda en los campos para corregirlo.
+    expect(_by_id(page, "calib-adc_noise")).to_have_value("40")
+
+    # Aceptado (`config`): se marcan los enviados y sus campos se vacían.
+    _by_id(page, "btn-calib-apply").click()
+    _wait_for(lambda: len(server.commands("set_profile")) == 2, page)
+    server.last.send({**SIM_CONFIG, "t_ms": 2500})
+    expect(_by_id(page, "calib-wheelbase_m-state")).to_have_text("MEDIDO 0.128 m")
+    expect(_by_id(page, "calib-adc_noise-state")).to_have_text("MEDIDO 40 ADC (±)")
+    expect(_by_id(page, "calib-adc_noise")).to_have_value("")
     assert capture.console_errors == []
 
 

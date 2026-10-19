@@ -10,8 +10,9 @@ function isNumber(value) {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+// `decimals = null`: el valor tal cual, sin redondear.
 function fixed(value, decimals, signed) {
-  const text = Math.abs(value).toFixed(decimals);
+  const text = decimals === null ? String(Math.abs(value)) : Math.abs(value).toFixed(decimals);
   // El signo sale del valor ya redondeado: −0.04 con un decimal es "0.0", no "−0.0".
   if (Number(text) === 0) return text;
   if (value < 0) return MINUS + text;
@@ -82,6 +83,14 @@ export function formatSeconds(ms) {
 /** `rate_hz`. */
 export function formatHz(value) {
   return withUnit(value, 0, false, "Hz");
+}
+
+/**
+ * Valor medido del perfil (calibración): tal como se envió, sin redondear (son mediciones con
+ * precisiones muy distintas, de 0.009525 m a 3900 ADC), con su unidad.
+ */
+export function formatMeasured(value, unit) {
+  return withUnit(value, null, false, unit);
 }
 
 /** Ganancias del PID (`kp`, `ki`, `kd`) en los campos de ajuste: 4 decimales, sin unidad. */

@@ -67,7 +67,7 @@ Abrir `http://localhost:8000/` en el navegador (ventana de 1440 × 900 o mayor).
 | 12 | Cargar un `.txt` cualquiera | error local "el archivo no es JSON válido", nada enviado | US3-5 |
 | 13 | Cargar como archivo el objeto `message` de `contract/examples/invalid/track/gaps-overlap.json`, guardado aparte (el archivo completo es un envoltorio de ejemplo, no una pista) | `invalid_track` visible; la pista no cambia | US3-6 |
 | 14 | Calibración: `wheelbase_m = 0.128`, Aplicar | `MEDIDO 0.128 m`; luego Borrar → `POR DEFECTO` | US4-2, US4-3 |
-| 15 | Calibración: `adc_noise = -5`, Aplicar | `out_of_range`/`invalid_params` visible; ninguna marca cambia | US4-5 |
+| 15 | Calibración: `adc_noise = -5`, Aplicar | campo marcado inválido, no se envía nada (fuera del rango del contrato); ninguna marca cambia | FR-030, FR-037 |
 | 16 | Durante una corrida, abrir Robot y pista o Calibración | acciones deshabilitadas con "Detén la corrida para cambiar esto" | US3-7, US4-7 |
 | 17 | Cortar el servidor (Ctrl+C) | `DESCONECTADO` y botón Reconectar; los controles se deshabilitan | US1-10 |
 | 18 | `VELOCISTA_MAX_SESSIONS=1`, abrir dos pestañas | la segunda muestra "Servidor lleno" y permite reintentar | borde "servidor lleno" |

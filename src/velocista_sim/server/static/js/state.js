@@ -4,6 +4,7 @@
 // llegar cada mensaje y marca `dirty` para que se redibuje en el siguiente cuadro.
 
 import { formatSeconds } from "./format.js";
+import { PROFILE_PARAMS } from "./profile-params.js";
 import { clearTrail, createTrail, pushPoint } from "./trail.js";
 
 const LOG_LIMIT = 50;
@@ -33,7 +34,7 @@ export function createState() {
     finishedRunId: null,    // evita revivir con telemetría atrasada una corrida ya terminada
     trail: createTrail(),
     lapTarget: { value: null, stopSentFor: null },
-    calibration: null,
+    calibration: createCalibration(),
     summaries: [],
     log: [],
     drafts: createDrafts(),
@@ -63,29 +64,34 @@ export function applyMessage(state, message) {
   if (Number.isInteger(message?.t_ms)) state.lastTMs = message.t_ms;
   switch (message?.type) {
     // hello: datos del robot y capacidades. Reemplaza al anterior, recalcula los derivados y
-    // limpia el rastro. Si llega tras un `load`, el pendiente lo resuelve el `config` siguiente.
+    // limpia el rastro y la calibración (el perfil se reinicializó: todo vuelve a "por defecto",
+    // FR-032). Si llega tras un `load`, el pendiente lo resuelve el `config` siguiente.
     case "hello":
       state.hello = message;
       state.caps = derived(state);
       state.connection.sessionId = message.session_id;
       clearTrail(state.trail);
+      state.calibration = createCalibration();
       return null;
 
     // config: valores confirmados (fuente de verdad de los controles, FR-013). Resuelve como
     // aceptado el pendiente más antiguo; con la cola vacía (apertura de sesión) solo actualiza.
     // Los controles que no se están arrastrando toman los valores confirmados.
     // Un `load` aceptado limpia el rastro y reinicia la calibración; un `load_track` aceptado
-    // limpia el rastro aunque el `track_id` no cambie (research R5, FR-018).
+    // limpia el rastro aunque el `track_id` no cambie (research R5, FR-018); un `set_profile`
+    // aceptado marca como medidos (o por defecto, con `null`) solo los parámetros enviados.
     case "config": {
       state.config = message;
       syncDrafts(state, false);
       const command = state.pending.shift();
       if (command?.cmd === "load") {
         clearTrail(state.trail);
-        state.calibration = null;
+        state.calibration = createCalibration();
       } else if (command?.cmd === "load_track") {
         clearTrail(state.trail);
         rememberFileTrack(state, message.track_id);
+      } else if (command?.cmd === "set_profile") {
+        applyMeasured(state, command.payload.measured);
       }
       return command ? { command, accepted: true } : null;
     }
@@ -245,6 +251,30 @@ export function markAutoStop(state) {
 function rememberFileTrack(state, trackId) {
   if (!trackId || state.catalog?.tracks.includes(trackId)) return;
   state.fileTracks.add(trackId);
+}
+
+/**
+ * Calibración: por cada parámetro de `set_profile`, el valor medido aceptado en esta sesión
+ * (`null` = "por defecto") y lo escrito en su campo sin aplicar (data-model.md, Calibration).
+ * Un `set_profile` rechazado no toca nada: el servidor aplica todo o nada.
+ */
+function createCalibration() {
+  return Object.fromEntries(PROFILE_PARAMS.map((param) => [param.key, { measured: null, draft: "" }]));
+}
+
+/** Marca los parámetros de un `set_profile` aceptado y vacía su campo, ya aplicado. */
+function applyMeasured(state, measured) {
+  for (const [key, value] of Object.entries(measured)) {
+    const entry = state.calibration[key];
+    if (!entry) continue;
+    entry.measured = value;
+    entry.draft = "";
+  }
+}
+
+/** Guarda lo que el usuario escribió en el campo de un parámetro, sin aplicarlo. */
+export function setCalibrationDraft(state, key, text) {
+  state.calibration[key].draft = text;
 }
 
 /** Valores en edición de los controles de ajuste: sin valor hasta el primer `config`. */

@@ -7,6 +7,7 @@ import { buildUrl, connect, send } from "./connection.js";
 import {
   addLog, applyMessage, createState, enqueuePending, markAutoStop, resetSession, setDragging, shouldAutoStop,
 } from "./state.js";
+import { initCalibration, renderCalibration } from "./views/calibration.js";
 import { initControl, renderControl } from "./views/control.js";
 import { renderController } from "./views/controller.js";
 import { byTestId, setHidden, watchSize } from "./views/dom.js";
@@ -23,7 +24,7 @@ import { initTrail, renderTrail } from "./views/trail-view.js";
 const LOGGED_COMMANDS = new Set(["start", "stop", "reset", "load", "load_track", "set_profile"]);
 
 // Vistas que se redibujan en cada cuadro sucio, en este orden.
-const VIEWS = [renderTopbar, renderSensors, renderController, renderTrail, renderLaps, renderRuns, renderControl, renderRobotTrack, renderLog];
+const VIEWS = [renderTopbar, renderSensors, renderController, renderTrail, renderLaps, renderRuns, renderControl, renderRobotTrack, renderCalibration, renderLog];
 
 const root = document;
 const state = createState();
@@ -140,6 +141,7 @@ function watchDragging(panel) {
 initControl(root, state, sendCommand);
 watchDragging(root.getElementById("panel-tuning"));
 initRobotTrack(root, state, { send: sendCommand, reconnect });
+initCalibration(root, state, sendCommand);
 byTestId(root, "btn-reconnect").addEventListener("click", () => reconnect());
 initTrail(root, state);
 watchSize(byTestId(root, "sensors-canvas"), markDirty);
