@@ -141,6 +141,16 @@ vuelve al confirmado y que el resumen indica `config_changed` (quickstart pasos 
 - [X] T036 [US2] Implementar la pestaña de ajuste en `src/velocista_sim/server/static/js/views/control.js` (panel de `tab-tuning`): `kp-range`/`kp-input`, `ki-range`/`ki-input`, `kd-range`/`kd-input`, `base-speed-range`/`base-speed-input`, `rate-input`, con los rangos de research R9 (`kp` 0–0.2 paso 0.0005, `ki` 0–0.01 paso 0.0001, `kd` 0–5 paso 0.01, 4 decimales; `base_speed` 0–255 paso 1; `rate_hz` 10–100 paso 1); el slider en `input` envía `commands.setConfig({campo})` vía `throttle` de 200 ms por campo y `flush` en `change`/`pointerup`; el campo numérico envía en `change` sin throttle y acepta cualquier valor ≥ 0 para `kp`/`ki`/`kd` (fuera del recorrido, el slider queda en el extremo); `base_speed` entero 0–255; `rate_hz` entero 10–100 con `commands.setRate`; valores inválidos → `aria-invalid="true"` y no se envía (FR-009–FR-012)
 - [X] T037 [US2] Integrar en `src/velocista_sim/server/static/js/main.js`: marcar/desmarcar `drafts.<campo>.dragging` en `pointerdown`/`pointerup` del slider, pasar los envíos por `sendCommand` (encolan pendientes) y re-renderizar los controles al llegar `config` o un `error` de `set_config`/`set_rate` (FR-013, US2-6)
 
+**Desvíos decididos al implementar (Fase 4)**:
+
+- T036: las filas de la pestaña Ajuste no están escritas en `index.html`; `control.js` las genera
+  desde su tabla `TUNING` (campo, `data-testid`, rótulo, unidad, rango del slider, formato y
+  validación), para que los rangos de research R9 y la validación estén en un solo lugar. Los
+  `data-testid` son los de contracts/ui-hooks.md.
+- T036: el campo numérico de `kp`, `ki` y `kd` acepta también coma decimal (`0,05`); se
+  convierte a número antes de enviar, así que `set_config` lleva el número JSON `0.05`, nunca
+  texto (lo verifica el test de T033 con `0,06`).
+
 **Checkpoint**: US1 y US2 funcionan juntas; los cambios se confirman en < 1 s (SC-002).
 
 ---

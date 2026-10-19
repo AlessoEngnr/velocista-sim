@@ -133,6 +133,15 @@ def test_tuning_sends_set_config_and_set_rate(page: Page, capture: Capture, live
     expect(_by_id(page, "kp-input")).to_have_value("0.0500")
     expect(_by_id(page, "kp-input")).to_have_attribute("aria-invalid", "false")
 
+    # Coma decimal: se envía como número JSON 0.06, no como el texto "0,06".
+    _commit(page, "kp-input", "0,06")
+    _wait_for(lambda: {"cmd": "set_config", "params": {"kp": 0.06}} in capture.sent(), page)
+    comma = _set_configs(capture)[-1]["params"]["kp"]
+    assert type(comma) is float and comma == 0.06
+    raw = [f.payload for f in capture.frames if f.direction == "sent" and '"set_config"' in f.payload][-1]
+    assert '"kp":0.06' in raw.replace(" ", ""), raw
+    expect(_by_id(page, "kp-input")).to_have_value("0.0600")
+
     # Arrastre continuo: pocos envíos por segundo y siempre el valor final.
     before = len(_set_configs(capture))
     final = _by_id(page, "kp-range").evaluate(DRAG_KP)
