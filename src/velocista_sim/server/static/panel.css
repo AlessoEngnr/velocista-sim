@@ -31,8 +31,8 @@
   --size-label: 0.6875rem;
 
   --gap: 12px;
-  --radius: 10px;
-  --radius-small: 6px;
+  --radius: 14px;
+  --radius-small: 8px;
 }
 
 *,
@@ -698,6 +698,9 @@ dd {
 }
 
 /* --- Pestaña Calibración: 12 parámetros con desplazamiento interno ---------------------- */
+/* Cada fila: primera línea con el rótulo (se parte si hace falta, nunca se recorta) y el estado a
+   su derecha; segunda línea con la ayuda (unidad y rango), el campo y Borrar.
+   Aplicar queda fijo bajo la lista (sticky), visible sin desplazar. */
 
 #panel-calibration {
   max-height: 340px;
@@ -706,46 +709,58 @@ dd {
 
 .calib-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 9ch auto;
+  grid-template-columns: minmax(0, 1fr) 10ch auto;
   grid-template-areas:
-    "label input clear"
-    "label state state";
+    "head head head"
+    "help input clear";
   align-items: center;
-  gap: 2px 8px;
+  gap: 3px 8px;
   padding: 5px 0;
   border-bottom: 1px solid var(--border);
 }
 
-.calib-label {
-  grid-area: label;
+.calib-head {
+  grid-area: head;
   display: flex;
-  flex-direction: column;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.calib-label {
+  min-width: 0;
   color: var(--text);
   font-size: var(--size-secondary);
+  overflow-wrap: anywhere;
 }
 
 .calib-help {
+  grid-area: help;
+  min-width: 0;
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: var(--size-label);
+  overflow-wrap: anywhere;
 }
 
 .calib-input {
   grid-area: input;
   width: 100%;
+  min-width: 0;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
 
 .calib-state {
-  grid-area: state;
-  min-width: 18ch;
+  flex: none;
   text-align: right;
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: var(--size-secondary);
+  font-size: var(--size-label);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .calib-state[data-state="measured"] {
@@ -754,12 +769,17 @@ dd {
 
 .calib-row .btn-small {
   grid-area: clear;
+  justify-self: end;
 }
 
 .calib-actions {
+  position: sticky;
+  bottom: 0;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  padding-top: 8px;
+  padding: 8px 0 2px;
+  border-top: 1px solid var(--border);
+  background: var(--card);
 }

@@ -239,13 +239,36 @@ cambia; borrar → `POR DEFECTO` (quickstart pasos 14–16).
 
 **Purpose**: distribución, accesibilidad, documentación y validación final.
 
-- [ ] T047 [P] Agregar a `tests/browser/test_panel_smoke.py` un test de distribución: con viewport 1440 × 900, `document.documentElement.scrollHeight <= innerHeight` y `scrollWidth <= innerWidth` (FR-044); con 1000 × 900, sin desplazamiento horizontal y la tarjeta Control antes que la Regleta en el orden visual; la página no contiene `<img>`, `<video>` ni reglas con `animation`/`transition` (FR-043, SC-010)
-- [ ] T048 [P] Crear `tests/browser/test_panel_load.py` con un test marcado `@pytest.mark.slow` (además de `browser` por el `conftest.py`), que queda **excluido de `uv run pytest` y de la CI** por `addopts = "-m 'not slow'"` y se corre con `uv run pytest -m slow tests/browser/test_panel_load.py`: abre el panel contra `live_url`, fija `rate-input = 100`, pulsa `btn-start` (vueltas objetivo vacío) y durante **30 s** de corrida comprueba cada pocos segundos que `seq` avanza; al final verifica `seq-lost` = 0, que `trail-canvas` tiene `data-points` > 0, que un cambio de `kp-input` se confirma (aparece en `kp-input` tras el `config`) en < 1 s y que `btn-stop` termina la corrida y agrega un resumen; sin errores de consola (SC-003, versión corta; la de 5 min es manual, quickstart paso 20)
-- [ ] T049 [P] Revisar `src/velocista_sim/server/static/panel.css` y las vistas: todo valor numérico usa `--font-mono` con `tabular-nums` y `min-width` en `ch` (SC-009); los estados (`line_lost`, `off_track`, `error`, conexión) llevan texto o símbolo además del color (SC-011); el texto chico nunca usa `--accent` (solo `--accent-text`)
-- [ ] T050 [P] Agregar la sección "Panel de laboratorio" a `README.md`: abrir `http://localhost:8000/` con `uv run velocista-sim`, qué muestra cada columna, cómo instalar Chromium para los tests (`uv run playwright install chromium`), `uv run pytest -m browser`, la prueba de carga `uv run pytest -m slow tests/browser/test_panel_load.py` (no corre en CI) y la verificación manual de 5 min a 100 Hz antes de cada PR (quickstart paso 20), y que el panel es el ejemplo de cliente v1 para el front (`connection.js`, `commands.js`, `state.js`, SC-007)
-- [ ] T051 Revisar que cada módulo JS de `src/velocista_sim/server/static/js/` tenga un comentario de cabecera en español con su responsabilidad y que `state.js` documente, junto a cada `case` de `applyMessage`, qué efecto tiene el mensaje (SC-007)
-- [ ] T052 Ejecutar `uv run pytest` completo (incluye `tests/browser/` con Chromium instalado) y corregir fallos; confirmar que los tests existentes de `/health` y `/ws` pasan sin modificaciones en sus asserts
+- [X] T047 [P] Agregar a `tests/browser/test_panel_smoke.py` un test de distribución: con viewport 1440 × 900, `document.documentElement.scrollHeight <= innerHeight` y `scrollWidth <= innerWidth` (FR-044); con 1000 × 900, sin desplazamiento horizontal y la tarjeta Control antes que la Regleta en el orden visual; la página no contiene `<img>`, `<video>` ni reglas con `animation`/`transition` (FR-043, SC-010)
+- [X] T048 [P] Crear `tests/browser/test_panel_load.py` con un test marcado `@pytest.mark.slow` (además de `browser` por el `conftest.py`), que queda **excluido de `uv run pytest` y de la CI** por `addopts = "-m 'not slow'"` y se corre con `uv run pytest -m slow tests/browser/test_panel_load.py`: abre el panel contra `live_url`, fija `rate-input = 100`, pulsa `btn-start` (vueltas objetivo vacío) y durante **30 s** de corrida comprueba cada pocos segundos que `seq` avanza; al final verifica `seq-lost` = 0, que `trail-canvas` tiene `data-points` > 0, que un cambio de `kp-input` se confirma (aparece en `kp-input` tras el `config`) en < 1 s y que `btn-stop` termina la corrida y agrega un resumen; sin errores de consola (SC-003, versión corta; la de 5 min es manual, quickstart paso 20)
+- [X] T049 [P] Revisar `src/velocista_sim/server/static/panel.css` y las vistas: todo valor numérico usa `--font-mono` con `tabular-nums` y `min-width` en `ch` (SC-009); los estados (`line_lost`, `off_track`, `error`, conexión) llevan texto o símbolo además del color (SC-011); el texto chico nunca usa `--accent` (solo `--accent-text`)
+- [X] T050 [P] Agregar la sección "Panel de laboratorio" a `README.md`: abrir `http://localhost:8000/` con `uv run velocista-sim`, qué muestra cada columna, cómo instalar Chromium para los tests (`uv run playwright install chromium`), `uv run pytest -m browser`, la prueba de carga `uv run pytest -m slow tests/browser/test_panel_load.py` (no corre en CI) y la verificación manual de 5 min a 100 Hz antes de cada PR (quickstart paso 20), y que el panel es el ejemplo de cliente v1 para el front (`connection.js`, `commands.js`, `state.js`, SC-007)
+- [X] T051 Revisar que cada módulo JS de `src/velocista_sim/server/static/js/` tenga un comentario de cabecera en español con su responsabilidad y que `state.js` documente, junto a cada `case` de `applyMessage`, qué efecto tiene el mensaje (SC-007)
+- [X] T052 Ejecutar `uv run pytest` completo (incluye `tests/browser/` con Chromium instalado) y corregir fallos; confirmar que los tests existentes de `/health` y `/ws` pasan sin modificaciones en sus asserts
 - [ ] T053 Recorrer a mano la tabla de la sección 2 de `specs/003-panel-laboratorio/quickstart.md` (pasos 1–20, incluida la corrida de 5 min a 100 Hz antes de abrir el PR) con `uv run velocista-sim` en una ventana de 1440 × 900, y correr `uv run pytest -m slow tests/browser/test_panel_load.py` y anotar cualquier desvío como tarea nueva en este archivo
+
+**Estado de T053**: `uv run pytest -m slow tests/browser/test_panel_load.py` pasa (30 s a
+100 Hz, `seq-lost` = 0, `kp` confirmado en < 1 s). Falta el recorrido manual de quickstart
+(pasos 1–20, con la corrida de 5 min a 100 Hz), que hace el usuario antes de abrir el PR.
+
+**Agregado y decidido al implementar (Fase 7)**:
+
+- Rangos (pedido del usuario): `numbers.js` reúne la validación numérica con `bounds`; `TUNING`
+  (control.js) y `PROFILE_PARAMS` exportan `integer` y `bounds`.
+  `tests/browser/test_panel_ranges.py` compara esos rangos con el JSON Schema del contrato
+  (resolviendo `$ref`) y prueba los valores de borde: el panel puede ser más estricto, nunca más
+  permisivo.
+- `adc_white`, `adc_black` y `adc_noise` (pedido del usuario): máximo 2^`adc_bits` − 1 según el
+  `hello` (4095 con 12 bits); la ayuda muestra el rango vigente. La validación equivalente en el
+  servidor queda para la rama 002-polish (`docs/backlog.md`).
+- `Cache-Control: no-cache` en todo archivo del panel (también en los `304`), con test; anotado
+  en contracts/http-panel.md.
+- Calibración: Aplicar queda fijo bajo la lista (sticky) y cada fila pasa a dos líneas
+  (rótulo + estado; ayuda + campo + Borrar) para que los rótulos no se recorten ni se apiñen en
+  ventanas angostas; un test lo verifica entre 360 y 1440 px.
+- Comparación con `docs/design/reference.png`: radio de las tarjetas 14 px (antes 10 px).
+- `docs/backlog.md` (nuevo): contrato v1.1 (`load_profile`, perfil efectivo al cliente),
+  002-polish, 001 (T063), simulador v2 y otros.
 
 ---
 

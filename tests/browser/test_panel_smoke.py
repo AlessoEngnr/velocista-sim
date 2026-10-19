@@ -350,9 +350,18 @@ def test_calibration_sets_and_clears_measured_values(page: Page, capture: Captur
     expect(_by_id(page, "calib-motor_tau_ms-state")).to_have_text("POR DEFECTO")
     expect(_by_id(page, "calib-wheelbase_m-state")).to_have_text("MEDIDO 0.128 m")
 
-    # Borrar: `null` para ese parámetro y vuelve a POR DEFECTO.
+    # Los `adc_*` se limitan a la escala del ADC del `hello` (12 bits → 0–4095), más estricto que
+    # el 0–65535 genérico del contrato.
     for key in ("adc_noise", "motor_tau_ms", "adc_white", "adc_black", "wheelbase_m"):
         _by_id(page, f"calib-{key}").fill("")
+    expect(_by_id(page, "calib-adc_white-range")).to_have_text("ADC · 0–4095 · entero")
+    _calibrate(page, {"adc_white": "4524"})
+    expect(_by_id(page, "calib-adc_white")).to_have_attribute("aria-invalid", "true")
+    page.wait_for_timeout(200)
+    assert len(_set_profiles(capture)) == 1
+
+    # Borrar: `null` para ese parámetro y vuelve a POR DEFECTO.
+    _by_id(page, "calib-adc_white").fill("")
     _by_id(page, "btn-calib-clear-wheelbase_m").click()
     _wait_for(lambda: _set_profiles(capture)[-1] == {"cmd": "set_profile", "measured": {"wheelbase_m": None}}, page)
     expect(_by_id(page, "calib-wheelbase_m-state")).to_have_text("POR DEFECTO")
@@ -379,6 +388,82 @@ def test_calibration_sets_and_clears_measured_values(page: Page, capture: Captur
 
     assert_frames_valid(capture.frames)
     assert capture.console_errors == []
+
+
+NO_MEDIA_OR_MOTION = """() => {
+  const motion = [];
+  for (const sheet of document.styleSheets) {
+    for (const rule of sheet.cssRules) {
+      if (rule.type === CSSRule.KEYFRAMES_RULE || /\\b(animation|transition)[a-z-]*\\s*:/.test(rule.cssText)) {
+        motion.push(rule.cssText.slice(0, 80));
+      }
+    }
+  }
+  return { media: document.querySelectorAll("img, video").length, motion };
+}"""
+
+# Aplicar visible dentro de la pestaña (arriba y al final del desplazamiento) y ningún texto de
+# las filas de Calibración se sale de su caja ni de la pestaña.
+CALIBRATION_LAYOUT = """() => {
+  const panel = document.getElementById("panel-calibration");
+  const apply = document.querySelector('[data-testid="btn-calib-apply"]');
+  const inside = () => {
+    const a = apply.getBoundingClientRect();
+    const p = panel.getBoundingClientRect();
+    return a.height > 0 && a.top >= p.top - 0.5 && a.bottom <= p.bottom + 0.5;
+  };
+  panel.scrollTop = 0;
+  const atTop = inside();
+  const scrolls = panel.scrollHeight > panel.clientHeight;
+  panel.scrollTop = panel.scrollHeight;
+  const atBottom = inside();
+  panel.scrollTop = 0;
+  const clipped = [];
+  const right = panel.getBoundingClientRect().right + 0.5;
+  for (const el of panel.querySelectorAll(".calib-label, .calib-help, .calib-state")) {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const text = range.getBoundingClientRect();
+    const box = el.getBoundingClientRect();
+    if (text.right > box.right + 0.5 || box.right > right) clipped.push(el.textContent.slice(0, 30));
+  }
+  return { atTop, atBottom, scrolls, clipped, overflowX: panel.scrollWidth - panel.clientWidth };
+}"""
+
+
+def test_layout_fits_without_media_or_motion(page: Page, live_url: str) -> None:
+    """FR-043, FR-044, SC-010: 1440 × 900 sin desplazamiento; 1000 × 900 sin desplazamiento
+    horizontal y Control antes que la Regleta; sin imágenes, video, animaciones ni transiciones."""
+    page.goto(live_url)
+    expect(_by_id(page, "kp-input")).to_have_value("0.0450")
+    for tab in ("tuning", "robot-track", "calibration"):
+        _by_id(page, f"tab-{tab}").click()
+        size = page.evaluate("() => [document.documentElement.scrollWidth, document.documentElement.scrollHeight, innerWidth, innerHeight]")
+        assert size[0] <= size[2] and size[1] <= size[3], (tab, size)
+
+    page.set_viewport_size({"width": 1000, "height": 900})
+    page.wait_for_timeout(100)
+    assert page.evaluate("() => document.documentElement.scrollWidth <= innerWidth")
+    control = page.locator(".card-control").bounding_box()
+    sensors = page.locator(".card-sensors").bounding_box()
+    assert control["y"] < sensors["y"], "Control debe ir antes que la Regleta"
+
+    result = page.evaluate(NO_MEDIA_OR_MOTION)
+    assert result == {"media": 0, "motion": []}, result
+
+
+def test_calibration_apply_stays_visible_and_texts_fit(page: Page, live_url: str) -> None:
+    """Aplicar queda fijo bajo la lista y los rótulos no se recortan en ventanas angostas."""
+    page.goto(live_url)
+    expect(_by_id(page, "kp-input")).to_have_value("0.0450")
+    _by_id(page, "tab-calibration").click()
+    for width in (1440, 1280, 1110, 1000, 700, 420, 360):
+        page.set_viewport_size({"width": width, "height": 900})
+        page.wait_for_timeout(100)
+        layout = page.evaluate(CALIBRATION_LAYOUT)
+        assert layout["scrolls"], (width, "la lista de 12 parámetros debería desplazarse")
+        assert layout["atTop"] and layout["atBottom"], (width, layout)
+        assert layout["clipped"] == [] and layout["overflowX"] <= 0, (width, layout)
 
 
 # --- Servidor falso --------------------------------------------------------------------------

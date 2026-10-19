@@ -1,6 +1,7 @@
 // Arranque del panel: crea el estado, abre la sesión en `/ws`, aplica cada mensaje al llegar y
 // redibuja como mucho una vez por cuadro con requestAnimationFrame (research R6).
-// Todo comando sale por `sendCommand`, que envía, encola el pendiente y registra.
+// Todo comando sale por `sendCommand`, que envía, encola el pendiente y anota en el registro los
+// que cambian la corrida o la sesión (los de ajuste no; sus errores sí).
 
 import * as commands from "./commands.js";
 import { buildUrl, connect, send } from "./connection.js";

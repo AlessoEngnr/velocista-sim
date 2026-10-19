@@ -24,6 +24,9 @@ para entregar archivos estáticos. No transporta datos de la simulación.
   con `http://www.w3.org/` (p. ej. `xmlns` de SVG), que no generan pedidos. Tampoco contienen
   `ws://` ni `wss://` literales: la URL del WebSocket se arma con `location` (research R4). Un
   test (`tests/integration/test_panel_static.py`) lo verifica.
+- Todo archivo bajo `/` se sirve con `Cache-Control: no-cache` (también los `304`): el navegador
+  puede guardarlo pero lo revalida con `ETag` antes de usarlo, así que tras un despliegue nunca
+  mezcla módulos ES de versiones distintas. `/health` y `/ws` no cambian. Un test lo verifica.
 - El único pedido de datos que hace la página es el WebSocket a `/ws` del mismo origen.
 - No hay autenticación (igual que `/ws`).
 - Sin dependencias nuevas de ejecución: `StaticFiles` viene con Starlette/FastAPI.

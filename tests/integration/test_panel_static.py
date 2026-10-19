@@ -89,3 +89,22 @@ def test_static_files_do_not_reach_other_origins() -> None:
             if not url.startswith(ALLOWED_URL_PREFIX):
                 problems.append(f"{name}: URL externa {url}")
     assert not problems, "\n".join(problems)
+
+
+@pytest.mark.parametrize("path", ["/", *[_published_path(path) for path in STATIC_FILES]])
+def test_static_files_are_always_revalidated(client: TestClient, path: str) -> None:
+    """`Cache-Control: no-cache`: tras un despliegue el navegador revalida cada módulo y nunca
+    mezcla archivos de versiones distintas (contracts/http-panel.md)."""
+    response = client.get(path)
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache"
+    # La revalidación responde 304 con el mismo encabezado.
+    etag = response.headers.get("etag")
+    if etag:
+        again = client.get(path, headers={"If-None-Match": etag})
+        assert again.status_code == 304
+        assert again.headers["cache-control"] == "no-cache"
+
+
+def test_health_is_not_affected_by_the_panel_cache_policy(client: TestClient) -> None:
+    assert "cache-control" not in client.get("/health").headers

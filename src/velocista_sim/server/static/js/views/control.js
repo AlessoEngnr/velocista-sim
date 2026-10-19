@@ -6,6 +6,7 @@
 
 import * as commands from "../commands.js";
 import { formatGain } from "../format.js";
+import { parseNumber } from "../numbers.js";
 import { markAutoStop, setDraft, setLapTarget, shouldAutoStop } from "../state.js";
 import { throttle } from "../throttle.js";
 import { clearTrail } from "../trail.js";
@@ -14,38 +15,29 @@ import { byTestId, setAttr, setHidden } from "./dom.js";
 const TABS = ["tuning", "robot-track", "calibration"];
 
 // Controles de la pestaña Ajuste con los recorridos de research R9. `range` es el slider (`null`:
-// solo campo numérico); `parse(text)` devuelve el número válido o `null`.
-const TUNING = [
-  { field: "kp", testId: "kp", label: "KP", range: { min: 0, max: 0.2, step: 0.0005 }, format: formatGain, parse: parseGain },
-  { field: "ki", testId: "ki", label: "KI", range: { min: 0, max: 0.01, step: 0.0001 }, format: formatGain, parse: parseGain },
-  { field: "kd", testId: "kd", label: "KD", range: { min: 0, max: 5, step: 0.01 }, format: formatGain, parse: parseGain },
+// solo campo numérico); `integer` y `bounds` validan el campo numérico, con el rango del contrato
+// o uno más estricto (FR-011, FR-012; tests/browser/test_panel_ranges.py). Las ganancias aceptan
+// cualquier valor ≥ 0, también fuera del recorrido del slider.
+export const TUNING = Object.freeze([
+  { field: "kp", testId: "kp", label: "KP", range: { min: 0, max: 0.2, step: 0.0005 }, format: formatGain, integer: false, bounds: { min: 0 } },
+  { field: "ki", testId: "ki", label: "KI", range: { min: 0, max: 0.01, step: 0.0001 }, format: formatGain, integer: false, bounds: { min: 0 } },
+  { field: "kd", testId: "kd", label: "KD", range: { min: 0, max: 5, step: 0.01 }, format: formatGain, integer: false, bounds: { min: 0 } },
   {
     field: "base_speed", testId: "base-speed", label: "VEL. BASE", unit: "PWM",
-    range: { min: 0, max: 255, step: 1 }, format: String, parse: (text) => parseInteger(text, 0, 255),
+    range: { min: 0, max: 255, step: 1 }, format: String, integer: true, bounds: { min: 0, max: 255 },
   },
   {
     field: "rate_hz", testId: "rate", label: "FRECUENCIA", unit: "Hz",
-    range: null, format: String, parse: (text) => parseInteger(text, 10, 100),
+    range: null, format: String, integer: true, bounds: { min: 10, max: 100 },
   },
-];
+].map((control) => Object.freeze(control)));
 
 // Valor de cada draft ya escrito en sus controles; se reescriben solo si cambió.
 const shown = new Map();
 
-/** Ganancia del PID: cualquier número ≥ 0, también fuera del recorrido del slider (FR-011). */
-function parseGain(text) {
-  const trimmed = text.trim().replace(",", ".");
-  if (!/^(\d+\.?\d*|\.\d+)$/.test(trimmed)) return null;
-  const value = Number(trimmed);
-  return Number.isFinite(value) ? value : null;
-}
-
-/** Entero entre `min` y `max`, ambos incluidos. */
-function parseInteger(text, min, max) {
-  const trimmed = text.trim();
-  if (!/^\d+$/.test(trimmed)) return null;
-  const value = Number(trimmed);
-  return value >= min && value <= max ? value : null;
+/** Valor válido escrito en el campo de `control`, o `null`. */
+export function parseTuning(control, text) {
+  return parseNumber(text, control);
 }
 
 /** Comando que fija `value` en `field`: `set_rate` para la frecuencia, `set_config` si no. */
@@ -86,7 +78,7 @@ function tuningRow(control) {
 
   const input = createInput("text", `${control.testId}-input`, control.field);
   input.className = "input value";
-  input.inputMode = control.parse === parseGain ? "decimal" : "numeric";
+  input.inputMode = control.integer ? "numeric" : "decimal";
   input.autocomplete = "off";
   input.setAttribute("aria-invalid", "false");
 
@@ -109,7 +101,7 @@ function initTuning(root, state, send) {
     const { field } = control;
     const input = byTestId(root, `${control.testId}-input`);
     input.addEventListener("change", () => {
-      const value = control.parse(input.value);
+      const value = parseTuning(control, input.value);
       setAttr(input, "aria-invalid", String(value === null));
       if (value === null) return;
       setDraft(state, field, value);

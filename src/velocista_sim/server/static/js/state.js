@@ -167,11 +167,14 @@ function startRun(state, runId) {
 
 function applyEvent(state, message) {
   switch (message.event) {
+    // run_started: abre la corrida observada (si la telemetría no la abrió antes) y se registra.
     case "run_started":
       if (state.run?.runId !== message.run_id) startRun(state, message.run_id);
       addLog(state, { kind: "event", tMs: message.t_ms, text: `▶ corrida ${message.run_id} iniciada` });
       break;
 
+    // lap: agrega la vuelta al historial (la más reciente primero) y recalcula última, mejor y
+    // promedio; si se perdió `run_started`, abre la corrida.
     case "lap": {
       if (state.run?.runId !== message.run_id) startRun(state, message.run_id);
       const run = state.run;
@@ -184,11 +187,14 @@ function applyEvent(state, message) {
       break;
     }
 
+    // off_track: anota la salida de pista con su `reason` (luego llega `run_finished`).
     case "off_track":
       state.run?.offTracks.push({ tMs: message.t_ms, reason: message.reason });
       addLog(state, { kind: "event", tMs: message.t_ms, text: `✕ FUERA DE PISTA (${message.reason})` });
       break;
 
+    // run_finished: antepone el resumen a `summaries` (tope 50), guarda la corrida para la
+    // tarjeta Vueltas y la cierra; `finishedRunId` evita revivirla con telemetría atrasada.
     case "run_finished": {
       state.summaries.unshift({ run_id: message.run_id, t_ms: message.t_ms, ...message.summary });
       if (state.summaries.length > SUMMARIES_LIMIT) state.summaries.length = SUMMARIES_LIMIT;

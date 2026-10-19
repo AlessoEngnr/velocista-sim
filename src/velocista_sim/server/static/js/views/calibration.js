@@ -1,12 +1,13 @@
 // Pestaña Calibración, solo con el simulador (FR-029–FR-033). Por cada parámetro de
 // `set_profile`: rótulo en español, unidad, rango como ayuda, campo para el valor medido, estado
 // ("MEDIDO <valor> <unidad>" o "POR DEFECTO") y botón Borrar. Aplicar envía un único
-// `set_profile` con todos los campos escritos; si alguno no es un número, se marca y no se envía
-// nada. Las marcas cambian solo cuando el servidor acepta (`config`), nunca al enviar.
+// `set_profile` con todos los campos escritos; si alguno no es un número o está fuera de rango, se
+// marca y no se envía nada. Los `adc_*` se limitan a la escala del ADC del `hello` (`adc_bits`).
+// Las marcas cambian solo cuando el servidor acepta (`config`), nunca al enviar.
 
 import * as commands from "../commands.js";
 import { formatMeasured } from "../format.js";
-import { PROFILE_PARAMS, parseDraft } from "../profile-params.js";
+import { PROFILE_PARAMS, paramRange, parseDraft } from "../profile-params.js";
 import { setCalibrationDraft } from "../state.js";
 import { byTestId, setAttr, setHidden, setText } from "./dom.js";
 
@@ -21,13 +22,24 @@ function element(tag, className, text) {
   return node;
 }
 
-/** Fila de un parámetro: rótulo y ayuda, campo, estado y botón Borrar. */
+/** Unidad, rango vigente y si es entero; el rango de los `adc_*` depende de `adc_bits`. */
+function helpText(param, adcBits) {
+  return `${param.unit} · ${paramRange(param, adcBits)}${param.integer ? " · entero" : ""}`;
+}
+
+function adcBits(state) {
+  return state.hello?.capabilities?.adc_bits ?? null;
+}
+
+/** Fila de un parámetro: rótulo, estado, ayuda (unidad y rango), campo y botón Borrar. */
 function paramRow(param) {
   const row = element("div", "calib-row");
 
   const label = element("label", "calib-label", param.label);
   label.htmlFor = `calib-${param.key}`;
-  label.append(element("span", "calib-help", `${param.unit} · ${param.range}${param.integer ? " · entero" : ""}`));
+  const help = element("span", "calib-help", helpText(param, null));
+  help.id = `calib-${param.key}-help`;
+  help.dataset.testid = `calib-${param.key}-range`;
 
   const input = element("input", "input value calib-input");
   input.type = "text";
@@ -37,6 +49,7 @@ function paramRow(param) {
   input.autocomplete = "off";
   input.placeholder = "medido";
   input.setAttribute("aria-invalid", "false");
+  input.setAttribute("aria-describedby", help.id);
   input.disabled = true;
 
   const status = element("span", "value calib-state", "POR DEFECTO");
@@ -48,7 +61,9 @@ function paramRow(param) {
   clear.setAttribute("aria-label", `Borrar el valor medido de ${param.label}`);
   clear.disabled = true;
 
-  row.append(label, input, status, clear);
+  const head = element("div", "calib-head");
+  head.append(label, status);
+  row.append(head, help, input, clear);
   return row;
 }
 
@@ -84,7 +99,7 @@ export function initCalibration(root, state, send) {
     for (const param of PROFILE_PARAMS) {
       const text = state.calibration[param.key].draft;
       if (text.trim() === "") continue;
-      const value = parseDraft(param, text);
+      const value = parseDraft(param, text, adcBits(state));
       setAttr(byTestId(root, `calib-${param.key}`), "aria-invalid", String(value === null));
       if (value === null) valid = false;
       else measured[param.key] = value;
@@ -101,8 +116,10 @@ function setDisabled(node, disabled) {
 export function renderCalibration(root, state) {
   const running = state.run !== null;
   const disabled = running || state.connection.status !== "open" || !state.caps.isSim || state.config === null;
+  const bits = adcBits(state);
   for (const param of PROFILE_PARAMS) {
     const entry = state.calibration[param.key];
+    setText(byTestId(root, `calib-${param.key}-range`), helpText(param, bits));
     const input = byTestId(root, `calib-${param.key}`);
     if (shownDrafts.get(param.key) !== entry.draft) {
       shownDrafts.set(param.key, entry.draft);

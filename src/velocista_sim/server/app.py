@@ -16,6 +16,8 @@ import anyio
 from fastapi import FastAPI, WebSocket
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.responses import Response
+from starlette.types import Scope
 from starlette.websockets import WebSocketDisconnect
 
 from .catalog import load_catalog
@@ -34,6 +36,17 @@ STATIC_DIR = Path(__file__).parent / "static"
 # rechaza módulos ES con ese tipo (research R2).
 mimetypes.add_type("text/javascript", ".js")
 mimetypes.add_type("text/css", ".css")
+
+
+class PanelFiles(StaticFiles):
+    """Archivos del panel con `Cache-Control: no-cache`: el navegador puede guardarlos, pero los
+    revalida (ETag → 304) antes de cada uso. Así, tras un despliegue nunca mezcla módulos ES de
+    versiones distintas (contracts/http-panel.md)."""
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 def create_app(settings: Settings | None = None, clock: Callable[[], float] | None = None) -> FastAPI:
@@ -83,7 +96,7 @@ def create_app(settings: Settings | None = None, clock: Callable[[], float] | No
             app.state.sessions -= 1
 
     # Al final: `/health` y `/ws` se resuelven antes que el montaje del panel (research R1).
-    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="panel")
+    app.mount("/", PanelFiles(directory=STATIC_DIR, html=True), name="panel")
     return app
 
 
